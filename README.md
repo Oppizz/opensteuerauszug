@@ -2,6 +2,7 @@
 
 ## VENDORED PACKAGE NOTICE
 This is a modified and adapted version of the otiginal opensteuerauszug by vroonhof [vroonhof/opensteuerauszug](https://github.com/vroonhof/opensteuerauszug)
+
 Main changes:
 - import all broker payments and tax values
 - support for bonds and bond accrued interest (not taxable in Switzerland)
