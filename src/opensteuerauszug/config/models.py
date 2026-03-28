@@ -1,7 +1,7 @@
 from typing import Dict, Any, Union, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
-from opensteuerauszug.render.translations import DEFAULT_LANGUAGE
+from ..render.translations import DEFAULT_LANGUAGE
 
 class GeneralSettings(BaseModel):
     '''General settings applicable globally.'''

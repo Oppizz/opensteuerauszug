@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from typing import Optional, Union
 from pathlib import Path
 
-from opensteuerauszug.model.kursliste import (
+from ..model.kursliste import (
     Share, Bond, Fund, Derivative, CoinBullion, CurrencyNote, LiborSwap,
     Sign, Da1Rate, KurslisteMetadata
 )

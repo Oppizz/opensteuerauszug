@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Dict, List, Optional, Union # Union will be removed from self.kurslisten type
 
-from opensteuerauszug.model.kursliste import Kursliste, Security, Payment  # Added Payment for type hint
+from ..model.kursliste import Kursliste, Security, Payment  # Added Payment for type hint
 from .kursliste_db_reader import KurslisteDBReader
 from .kursliste_accessor import KurslisteAccessor # Added import
 
