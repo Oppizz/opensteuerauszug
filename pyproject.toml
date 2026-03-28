@@ -25,7 +25,7 @@ dependencies = [
     "reportlab>=4.0.0", # Added for PDF generation in render module
     "python-barcode>=0.15.0", # Added for barcode generation in render module
     "pypdf>=4.0.0", # Use pypdf for PDF reading and analysis
-    "ibflex @ git+https://github.com/vroonhof/ibflex.git",
+    "ibflex @ git+https://github.com/oppizz/ibflex.git",
     "pdf417gen @ git+https://github.com/vroonhof/pdf417-py.git",
     "markdown",
     "platformdirs>=3.0.0",
