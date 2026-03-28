@@ -1,5 +1,16 @@
 # OpenSteuerAuszug
 
+##VENDORED PACKAGE NOTICE
+This is a modified and adapted version of the otiginal opensteuerauszug by vroonhof [vroonhof/opensteuerauszug](https://github.com/vroonhof/opensteuerauszug)
+Main changes:
+- import all broker payments and tax values
+- support for bonds and bond accrued interest (not taxable in Switzerland)
+- option to remove all securities without value at the start end end of tax period and without any taxable payments
+- summarize by currency for easy comparison with IBKR statements
+- etc.
+
+##ORGINAL README
+
 A Python package for generating Swiss tax statements (Steuerauszüge) from the statements of brokers that don't support it, e.g. mostly foreign ones.
 This goal is to eliminate tedious and error prone manual typing into the tax software.
 
