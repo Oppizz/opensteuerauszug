@@ -3,9 +3,9 @@ import json
 from typing import List, Optional, Tuple, Any, Annotated
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from ..model.position import Position, SecurityPosition, CashPosition
-from ..model.ech0196 import SecurityStock, SecurityPayment, CurrencyId, QuotationType
-from ..core.constants import UNINITIALIZED_QUANTITY
+from ...model.position import Position, SecurityPosition, CashPosition
+from ...model.ech0196 import SecurityStock, SecurityPayment, CurrencyId, QuotationType
+from ...core.constants import UNINITIALIZED_QUANTITY
 
 # A logger for this module
 logger = logging.getLogger(__name__)
