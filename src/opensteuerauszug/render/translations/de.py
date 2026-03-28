@@ -30,6 +30,8 @@ TRANSLATIONS = {
     'liabilities_title': 'Schulden',
     'reconciliation_kursliste_broker': 'Abgleich Kursliste / Brokerzahlungen',
     'tax_statement_in_chf': 'Steuerauszug in CHF',
+    'currency_summary': 'Summierung Währungen',
+    'reconciliation_taxvalue_kursliste_broker': 'Abgleich Kursliste / Brokerbewertungen',
 
     # === BARCODE PAGE ===
     'barcode_page': 'Barcode Seite {page} von {total}',
@@ -63,6 +65,7 @@ TRANSLATIONS = {
     # === BANK ACCOUNTS TABLE ===
     'total_bank_accounts': 'Total Bankkonten',
     'designation_bank_account_interest': 'Bezeichnung<br/>Bankkonto<br/>Zinsen',
+    'total_steuerwert': 'Total Steuerwert',
     'opening': 'Eröffnung {date}',
     'closing': 'Saldierung {date}',
     'value_header': 'Wert<br/>{date}<br/>in CHF',
@@ -101,14 +104,30 @@ TRANSLATIONS = {
     'tax_value_liabilities_interest': 'Steuerwert / Schuldzinsen',
     'total_liabilities': 'Total Schulden',
 
+    # === CURRENCY SUMMARY TABLE ===
+    'valor_number': 'Valoren-Nr',
+    'gross_revenue_year_header': '<b>Bruttoertrag</b> {year} in CHF',
+    'gross_revenue_currency_year_header': '<b>Bruttoertrag</b> {year} in Währung',
+    'wht_year_header': '<b>Quellensteuer</b> {year} in CHF',
+    'wht_currency_year_header': '<b>Quellensteuer</b> {year} in Währung',
+    'tax_value_currency_header': '<b>Steuerwert</b><br/>{date}<br/>in Währung',
+    'total_subfooter': '<b>Total</b> {category}',
+    'total_subfooter2': '<b>Total</b> {currency} {category}',
+    'capital_return': '<b>Kapitalrückz.<br/>Marchzins</b><br/>{year} in CHF',
+
     # === PAYMENT RECONCILIATION TABLE ===
     'reconciliation_payments': 'Abgleich Zahlungen ({country})',
+    'recon_source': 'Quelle',
     'kl_dividend_chf': 'KL Div CHF',
     'kl_withholding_chf': 'KL Quellenst. CHF',
     'broker_dividend': 'Broker Div',
     'broker_withholding': 'Broker Quellenst.',
     'ok': 'OK',
     'security': 'Wertschrift',
+    'sec_is_in_kursliste': 'Security ist in Kursliste',
+    'reconciliation_taxvalue': 'Abgleich Werte ({country})',
+    'kl_value_chf': 'KL Wert CHF',
+    'broker_value': 'Broker Wert',
 
     # === INSTRUCTIONS & FOOTNOTES ===
     'footnote_ab_breakdown': '(1) Davon <b>A</b> {} und <b>B</b> {}',

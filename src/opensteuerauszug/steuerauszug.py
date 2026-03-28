@@ -1,4 +1,5 @@
 import logging
+import debugpy
 import typer
 import sys
 from enum import Enum
@@ -7,8 +8,8 @@ from typing import List, Optional
 from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 
-from opensteuerauszug.config.models import SchwabAccountSettings, IbkrAccountSettings, GeneralSettings # Added GeneralSettings
-from opensteuerauszug.render.translations import DEFAULT_LANGUAGE
+from .config.models import SchwabAccountSettings, IbkrAccountSettings, GeneralSettings # Added GeneralSettings
+from .render.translations import DEFAULT_LANGUAGE
 from .core.identifier_loader import SecurityIdentifierMapLoader
 
 # Use the generated eCH-0196 model
@@ -22,6 +23,7 @@ from .calculate.cleanup import CleanupCalculator
 from .calculate.minimal_tax_value import MinimalTaxValueCalculator
 from .calculate.kursliste_tax_value_calculator import KurslisteTaxValueCalculator
 from .calculate.fill_in_tax_value_calculator import FillInTaxValueCalculator
+from .calculate.broker_fill_in_tax_value_calculator import BrokerFillInTaxValueCalculator
 from .calculate.payment_reconciliation_calculator import PaymentReconciliationCalculator
 from .util.known_issues import is_known_issue
 from .importers.schwab.schwab_importer import SchwabImporter
@@ -67,6 +69,7 @@ class TaxCalculationLevel(str, Enum):
     MINIMAL = "minimal"
     KURSLISTE = "kursliste"
     FILL_IN = "fillin"
+    BROKER_FILL_IN = "broker_fillin"
 
 class LogLevel(str, Enum):
     DEBUG = "DEBUG"
@@ -102,7 +105,9 @@ def process(
     strict_consistency_flag: bool = typer.Option(True, "--strict-consistency/--no-strict-consistency", help="Enable/disable strict consistency checks in importers (e.g., Schwab). Defaults to strict."),
     filter_to_period_flag: bool = typer.Option(True, "--filter-to-period/--no-filter-to-period", help="Filter transactions and stock events to the tax period (with closing balances). Defaults to enabled."),
     tax_calculation_level: TaxCalculationLevel = typer.Option(TaxCalculationLevel.KURSLISTE, "--tax-calculation-level", help="Specify the level of detail for tax value calculations."),
+    skip_broker_payments_from_reconciliation: bool = typer.Option(False, "--skip-broker-payments-from-reconciliation", help="Whether to skip broker payments when performing payment reconciliation. Defaults to False (include broker payments)."),
     log_level: LogLevel = typer.Option(LogLevel.INFO, "--log-level", help="Set the log level for console output."),
+    log_file: Optional[Path] = typer.Option(None, "--log-file", help="Write logs to this file."),
     config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to the configuration TOML file. Defaults to config.toml in CWD or XDG config home."),
     broker_name: Optional[str] = typer.Option(None, "--broker", help="Broker name (e.g., 'schwab') from config.toml to use for this run."),
     override_configs: List[str] = typer.Option(None, "--set", help="Override configuration settings using path.to.key=value format. Can be used multiple times."),
@@ -113,7 +118,15 @@ def process(
     post_amble: Optional[List[Path]] = typer.Option(None, "--post-amble", help="List of PDF documents to add after the main steuerauszug."),
 ):
     """Processes financial data to generate a Swiss tax statement (Steuerauszug)."""
-    logging.basicConfig(level=log_level.value)
+    if log_file:
+        logging.basicConfig(level=log_level.value,
+                            filename=str(log_file),
+                            filemode="w",
+                            format='%(asctime)s %(name)s %(levelname)s %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S')
+    else:
+        logging.basicConfig(level=log_level.value)
+
     # Suppress pypdf warnings to avoid cluttering output with benign warnings
     # about rotated text and other PDF layout issues
     logging.getLogger('pypdf').setLevel(logging.ERROR)
@@ -457,8 +470,18 @@ def process(
                 print("Running FillInTaxValueCalculator...")
                 calculator_name = "FillInTaxValueCalculator"
                 tax_value_calculator = FillInTaxValueCalculator(mode=CalculationMode.OVERWRITE, exchange_rate_provider=exchange_rate_provider, keep_existing_payments=config_manager.calculate_settings.keep_existing_payments)
-            
+            elif tax_calculation_level == TaxCalculationLevel.BROKER_FILL_IN:
+                print("Running BrokerFillInTaxValueCalculator...")
+                calculator_name = "BrokerFillInTaxValueCalculator"
+                tax_value_calculator = BrokerFillInTaxValueCalculator(mode=CalculationMode.OVERWRITE, exchange_rate_provider=exchange_rate_provider, keep_existing_payments=config_manager.calculate_settings.keep_existing_payments)
+
             if tax_value_calculator and calculator_name:
+                if config_manager.calculate_settings.remove_zero_positions:
+                    tax_value_calculator.remove_zero_positions = True
+                if Phase.RECONCILE_PAYMENTS not in run_phases:
+                    tax_value_calculator.reconciliation_active = False
+                if config_manager.calculate_settings.summarize_options:
+                    tax_value_calculator.summarize_options = True
                 statement = tax_value_calculator.calculate(statement)
                 print(f"{calculator_name} finished. Modified fields: {len(tax_value_calculator.modified_fields) if tax_value_calculator.modified_fields else '0'}, Errors: {len(tax_value_calculator.errors)}")
                 dump_debug_model(current_phase.value + f"_after_{calculator_name.lower()}", statement)
@@ -515,6 +538,9 @@ def process(
             elif tax_calculation_level == TaxCalculationLevel.FILL_IN:
                 verifier_name = "FillInTaxValueCalculator"
                 tax_value_verifier = FillInTaxValueCalculator(mode=CalculationMode.VERIFY, exchange_rate_provider=exchange_rate_provider_verify, keep_existing_payments=config_manager.calculate_settings.keep_existing_payments)
+            elif tax_calculation_level == TaxCalculationLevel.BROKER_FILL_IN:
+                verifier_name = "BrokerFillInTaxValueCalculator"
+                tax_value_verifier = BrokerFillInTaxValueCalculator(mode=CalculationMode.VERIFY, exchange_rate_provider=exchange_rate_provider_verify, keep_existing_payments=config_manager.calculate_settings.keep_existing_payments)
 
             if tax_value_verifier and verifier_name:
                 print(f"Running {verifier_name} (Verify Mode)...")
@@ -551,6 +577,13 @@ def process(
                 raise ValueError("TaxStatement model not loaded. Cannot run payment reconciliation phase.")
 
             reconciliation_calculator = PaymentReconciliationCalculator()
+            if (skip_broker_payments_from_reconciliation):
+                reconciliation_calculator.skip_broker_payment = True
+            reconciliation_calculator.language = (
+                    general_config_settings.language
+                    if general_config_settings
+                    else DEFAULT_LANGUAGE
+                )
             statement = reconciliation_calculator.calculate(statement)
             report = statement.payment_reconciliation_report
             if report:

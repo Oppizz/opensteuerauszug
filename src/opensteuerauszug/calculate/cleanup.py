@@ -3,17 +3,17 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any, cast, get_args
 from decimal import Decimal
 import logging
-from opensteuerauszug.model.ech0196 import (
+from ..model.ech0196 import (
     SecurityTaxValue, TaxStatement, SecurityStock, BankAccountPayment, SecurityPayment,
     Client, ClientNumber, CantonAbbreviation, LiabilityAccount, LiabilityAccountTaxValue,
     ListOfLiabilities, BankAccountName, CountryIdISO2Type, CurrencyId, LiabilityAccountPayment
 )
-from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
-from opensteuerauszug.util.sorting import find_index_of_date, sort_security_stocks, sort_payments, sort_security_payments
-from opensteuerauszug.config.models import GeneralSettings
-from opensteuerauszug.core.position_reconciler import PositionReconciler
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
-from opensteuerauszug.core.organisation import compute_org_nr
+from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
+from ..util.sorting import find_index_of_date, sort_security_stocks, sort_payments, sort_security_payments
+from ..config.models import GeneralSettings
+from ..core.position_reconciler import PositionReconciler
+from ..core.constants import UNINITIALIZED_QUANTITY
+from ..core.organisation import compute_org_nr
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +523,7 @@ class CleanupCalculator:
                                                 quotationType=candidate.quotationType,
                                                 quantity=candidate.quantity,
                                                 balanceCurrency=candidate.balanceCurrency,
+                                            balanceCurrencyBroker=candidate.balanceCurrency,
                                                 balance=candidate.balance,
                                                 unitPrice=candidate.unitPrice)
                                         else:

@@ -24,6 +24,10 @@ def round_accounting(value: Decimal | float | int) -> Decimal:
         Der gerundete Betrag als Decimal.
     """
     val_decimal = Decimal(str(value)) # Ensure Decimal for precision
+    
+    if abs(val_decimal) < 1.0:
+        # Round to 3 decimal places
+        return val_decimal.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
     if abs(val_decimal) < 100:
         # Round to 3 decimal places

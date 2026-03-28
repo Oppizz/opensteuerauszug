@@ -1,3 +1,5 @@
+from collections import defaultdict
+from copy import deepcopy
 import io
 from math import floor
 import sys
@@ -5,7 +7,7 @@ import hashlib
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from decimal import Decimal, ROUND_HALF_UP
 import zlib
 from PIL import Image as PILImage
@@ -26,23 +28,26 @@ from reportlab.lib.pagesizes import A4, landscape
 import logging
 
 # --- Import TaxStatement model ---
-from opensteuerauszug.model.ech0196 import TaxStatement
-from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
+from ..model.ech0196 import Depot, SecurityPayment, TaxStatement, Security
+from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
+from ..model.payment_reconciliation import PaymentReconciliationRow, TaxValueReconciliationRow
+
+from ..core.constants import NON_TAXABLE_SIGNS
 
 # --- Import OneDeeBarCode for barcode rendering ---
-from opensteuerauszug.render.onedee import OneDeeBarCode
+from ..render.onedee import OneDeeBarCode
 
 # --- Import Organisation helper functions ---
-from opensteuerauszug.core.organisation import compute_org_nr
+from ..core.organisation import compute_org_nr
 
 # --- Import Security type utilities ---
-from opensteuerauszug.core.security import determine_security_type, SecurityType
+from ..core.security import determine_security_type, SecurityType
 
 # --- Import styles utility ---
-from opensteuerauszug.util.styles import get_custom_styles, FONT_REGULAR, FONT_BOLD
-from opensteuerauszug.util import round_accounting
-from opensteuerauszug.render.markdown_renderer import markdown_to_platypus
-from opensteuerauszug.render.translations import t as _t, DEFAULT_LANGUAGE
+from ..util.styles import get_custom_styles, FONT_REGULAR, FONT_BOLD
+from ..util import round_accounting
+from ..render.markdown_renderer import markdown_to_platypus
+from ..render.translations import t as _t, DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +130,11 @@ def format_currency(value: Optional[Decimal], default=''):
 
         two_dec = decimal_value.quantize(Decimal("0.01"))
         three_dec = decimal_value.quantize(Decimal("0.001"))
+        four_dec = decimal_value.quantize(Decimal("0.0001"))
 
-        if two_dec == three_dec:
+        if value < 1.0 and three_dec != four_dec:
+            formatted = "{:,.4f}".format(four_dec)
+        elif two_dec == three_dec:
             formatted = "{:,.2f}".format(two_dec)
         else:
             formatted = "{:,.3f}".format(three_dec)
@@ -1574,7 +1582,7 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
         Paragraph(t('quantity_nominal'), header_style),
         Paragraph(t('currency_country'), header_style),
         Paragraph(t('unit_price_nominal_revenue'), header_style),
-        Paragraph(t('ex_date_short'), header_left),
+        Paragraph(t('ex_date_short'), header_style),
         Paragraph(t('exchange_rate'), header_style),
         Paragraph(t('tax_value_date').format(date=period_end_date), header_style),
         Paragraph(t('column_a'), header_style),
@@ -1713,7 +1721,7 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
                         Paragraph(format_stock_quantity(entry.quantity, False, stock_quantity_template), val_right),
                         Paragraph(entry.amountCurrency or '', val_right),
                         Paragraph(format_currency(entry.amountPerUnit), val_right),
-                        Paragraph(entry.exDate.strftime("%d.%m.") if getattr(entry, 'exDate', None) else '', val_right),
+                        Paragraph(entry.exDate.strftime("%d.%m.%y") if getattr(entry, 'exDate', None) else '', val_right),
                         Paragraph(format_exchange_rate(entry.exchangeRate) if getattr(entry, 'exchangeRate', None) else '', val_right),
                         Paragraph('', val_right),
                         '',
@@ -1768,7 +1776,7 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
                 Paragraph(tax_value.balanceCurrency or '' if tax_value else '', val_right),
                 Paragraph(unit_price, val_right),
                 Paragraph('', val_left),
-                Paragraph('', val_right),
+                Paragraph(format_exchange_rate(tax_value.exchangeRate) if tax_value and getattr(tax_value, 'exchangeRate', None) else '', val_right),
                 Paragraph(format_currency_2dp(tax_value.value) if tax_value and getattr(tax_value, 'value', None) else '', bold_right),
                 '',
                 Paragraph(format_currency_2dp(security.totalGrossRevenueA), bold_right),
@@ -1851,6 +1859,350 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
     securities_table.setStyle(TableStyle(table_style))
     return securities_table
 
+def create_currency_summary_table(tax_statement: TaxStatement, styles, usable_width):
+    if not tax_statement.listOfSecurities or not tax_statement.listOfSecurities.depot:
+        return None
+    # only print if reconciliation is active
+    if tax_statement.payment_reconciliation_report is None:
+        return None
+    
+    depots = tax_statement.listOfSecurities.depot
+    period_end_date = tax_statement.periodTo.strftime("%d.%m.%Y") if tax_statement.periodTo else "31.12.2024"
+    year = str(tax_statement.taxPeriod) if tax_statement.taxPeriod else "2024"
+    
+    header_style = styles['Header_RIGHT']
+    header_left = styles['Header_LEFT']
+    val_left = styles['Val_LEFT']
+    val_right = styles['Val_RIGHT']
+    val_center = styles['Val_CENTER']
+    bold_left = styles['Bold_LEFT']
+    bold_right = styles['Bold_RIGHT']
+
+    # Table header with security type in the title
+    table_header = [
+        Paragraph(t('valor_number_date'), header_left),
+        Paragraph(t('depot_number_designation_isin'), header_left),
+        Paragraph(t('quantity_nominal'), header_style),
+        Paragraph(t('exchange_rate'), header_style),
+        Paragraph(t('gross_revenue_currency_year_header').format(year=year), header_style),
+        Paragraph(t('gross_revenue_year_header').format(year=year), header_style),
+        #Paragraph(t('wht_currency_year_header').format(year=year), header_style),
+        Paragraph(t('wht_year_header').format(year=year), header_style),
+        Paragraph(t('capital_return').format(year=year), header_style),
+        Paragraph(t('tax_value_currency_header').format(date=period_end_date), header_style),
+        Paragraph(t('tax_value_header').format(date=period_end_date), header_style),
+    ]
+
+    col_widths = [21*mm, 85*mm, 14*mm, 18*mm, 20*mm, 20*mm, 20*mm, 20*mm, 21*mm, 21*mm]
+    col_widths = [1.0*w for w in col_widths]
+    assert len(col_widths) == len(table_header)
+
+    table_data = []
+    depot_header_rows = []
+    currency_header_rows = []
+    category_header_rows = []
+    security_start_rows = []
+    footer_total_rows = []
+    current_row = 1  # Start after header
+
+    class RunningTotals:
+        def __init__(self):
+            self.revenue = Decimal('0')
+            self.revenueCHF = Decimal('0')
+            self.wthCHF = Decimal('0')
+            self.capital_return_CHF = Decimal('0')
+            self.balance = Decimal('0')
+            self.value = Decimal('0')
+
+        def add_payment(self, revenue: Optional[Decimal], revenueCHF: Optional[Decimal], wthCHF: Optional[Decimal], capital_return_CHF: Optional[Decimal]):
+            if revenue:
+                self.revenue += revenue
+            if revenueCHF:
+                self.revenueCHF += revenueCHF
+            if wthCHF:
+                self.wthCHF += wthCHF
+            if capital_return_CHF:
+                self.capital_return_CHF += capital_return_CHF
+        def add_tax_value(self, balance: Optional[Decimal], value: Optional[Decimal]):
+            if balance:
+                self.balance += balance
+            if value:
+                self.value += value
+
+        def get_difference(self, prev_total: RunningTotals):
+            diff = RunningTotals()
+            diff.revenue = self.revenue - prev_total.revenue
+            diff.revenueCHF = self.revenueCHF - prev_total.revenueCHF
+            diff.wthCHF = self.wthCHF - prev_total.wthCHF
+            diff.capital_return_CHF = self.capital_return_CHF - prev_total.capital_return_CHF
+            diff.balance = self.balance - prev_total.balance
+            diff.value = self.value - prev_total.value
+            return diff
+
+    for depot in depots:
+        currency_map: defaultdict[str, defaultdict[str, Security]] = defaultdict(lambda: defaultdict(lambda: []))
+        for security in depot.security:
+            currency = None
+            if security.taxValue:
+                currency = security.taxValue.balanceCurrencyBroker or security.taxValue.balanceCurrency or security.currency or '?'
+                currency_map[currency][security.securityCategory or '?'].append(security)
+            payment_list = security.get_payment_and_broker_nontaxable()
+            if payment_list and len(payment_list) > 0:
+                prev_currency = None
+                for payment in sorted(payment_list, key=lambda p: p.amountCurrency or ''):
+                    if payment.amountCurrency and (currency is None or payment.amountCurrency != currency) and (
+                        payment.grossRevenueA or payment.grossRevenueB or payment.withHoldingTaxClaim or payment.nonRecoverableTaxAmount
+                    ):
+                        if prev_currency != payment.amountCurrency:
+                            currency_map[payment.amountCurrency][security.securityCategory or '?'].append(security)
+                            prev_currency = payment.amountCurrency
+
+
+        # Add depot header row
+        depot_header_text = t('depot').format(number=depot.depotNumber or '')
+        depot_header_row = [
+            Paragraph('', val_left),
+            Paragraph(depot_header_text, bold_left),
+        ] + [Paragraph('', val_left)] * (len(table_header) - 2)
+        table_data.append(depot_header_row)
+        depot_header_rows.append(current_row)
+        current_row += 1
+
+        runningTotals = RunningTotals()
+
+        first_currency = True
+        for currency, type_securities in sorted(currency_map.items()):
+            currency_start_totals: RunningTotals = deepcopy(runningTotals)
+
+            # Separator row - use non-breaking space for height
+            table_data.append([Paragraph('&nbsp;')]*len(table_header))
+            current_row += 1
+
+            currency_header_row = [
+                Paragraph('', val_left),
+                Paragraph(currency or '', bold_left),
+            ] + [Paragraph('', val_left)] * (len(table_header) - 2)
+            table_data.append(currency_header_row)
+            currency_header_rows.append(current_row)
+            current_row += 1
+
+            first_category = True
+            for category, securities in sorted(type_securities.items()):
+                category_start_totals: RunningTotals = deepcopy(runningTotals)
+
+                category_header_row = [
+                    Paragraph('', val_left),
+                    Paragraph(category or '', bold_left),
+                ] + [Paragraph('', val_left)] * (len(table_header) - 2)
+                table_data.append(category_header_row)
+                category_header_rows.append(current_row)
+                current_row += 1
+                # Separator row - use non-breaking space for height
+                #table_data.append([Paragraph('&nbsp;')]*len(table_header))
+                #current_row += 1
+
+                # Sort by country first if security type is DA1, then by valor number and name
+                def securities_in_depot_sort_key(s):
+                    name = s.securityName if s.securityName is not None else ''
+                    valor = int(s.valorNumber) if s.valorNumber is not None else 0
+                    isin = s.isin if s.isin is not None else ''
+                    return (valor, isin, name)
+                
+                securities.sort(key=securities_in_depot_sort_key)
+                security: Security
+                for security in securities:
+                    tax_value = security.taxValue
+                    if currency != (security.taxValue.balanceCurrencyBroker or security.taxValue.balanceCurrency or security.currency or '?'):
+                        tax_value = None
+                    precision = find_minimal_decimals(security.nominalValue)
+                    if getattr(security, 'payment', None):
+                        for payment in security.payment:
+                            precision = max(precision, find_minimal_decimals(payment.quantity))
+                    if tax_value and getattr(tax_value, 'quantity', None):
+                        precision = max(precision, find_minimal_decimals(tax_value.quantity))
+                    if precision > 0:
+                        stock_quantity_template = Decimal('0.' + '0' * precision)
+                    else:
+                        stock_quantity_template = Decimal('0')
+
+                    quantity: Optional[Decimal] = getattr(tax_value, 'quantity', None) if tax_value else None
+                    value: Optional[Decimal] = getattr(tax_value, 'value', None) if tax_value else None
+                    balance: Optional[Decimal] = getattr(tax_value, 'balance', None) if tax_value else None
+
+                    sec_header_added = False
+                    is_not_option = category != 'OPTION'
+                    security_header_row = [
+                        Paragraph(f"{security.valorNumber or ''}", bold_left),
+                        Paragraph(f"{'<b>' if is_not_option else ''}{escape_html_for_paragraph(security.securityName or '')}{'</b>' if is_not_option else ''}<br/>{escape_html_for_paragraph(security.isin or '')}", val_left),
+                        Paragraph(format_stock_quantity(quantity, False, stock_quantity_template, '0' if tax_value else ''), val_right),
+                        Paragraph(format_exchange_rate(tax_value.exchangeRate) if tax_value and getattr(tax_value, 'exchangeRate', None) else '', val_right),
+                        Paragraph('', val_right),
+                        Paragraph('', val_right),
+                        #Paragraph('', val_right),
+                        Paragraph('', val_right),
+                        Paragraph('', val_right),
+                        Paragraph(format_currency_2dp(balance, '0.00' if tax_value else ''), val_right),
+                        Paragraph(format_currency_2dp(value, '0.00' if tax_value else ''), val_right),
+                    ]
+                    if tax_value and (quantity not in (Decimal('0'), None) or value not in (Decimal('0'), None) or balance not in (Decimal('0'), None)):
+                        table_data.append(security_header_row)
+                        security_start_rows.append(current_row)
+                        current_row += 1
+                        runningTotals.add_tax_value(balance, value)
+                        sec_header_added = True
+
+                    payment_list = security.get_payment_and_broker_nontaxable()
+                    if payment_list and len(payment_list) > 0:
+                        payment: SecurityPayment
+                        for payment in sorted(payment_list, key=lambda x: x.paymentDate):
+                            if payment.amountCurrency is None or payment.amountCurrency != currency:
+                                continue
+
+                            name = payment.name or ''
+                            if payment.sign:
+                                name = f"{name} {payment.sign}"
+                            revenue_CHF: Decimal = Decimal('0')
+                            revenue = payment.amount or Decimal('0')
+                            wthAmount_CHF: Decimal = Decimal('0')
+                            capital_return_CHF: Decimal = Decimal('0')
+                            
+                            if payment.sign and payment.sign in NON_TAXABLE_SIGNS and payment.amount_CHF:
+                                capital_return_CHF = payment.amount_CHF if payment.amount_CHF else Decimal('0')
+                                revenue = Decimal('0')
+                            else:
+                                if getattr(payment, 'grossRevenueA', None):
+                                    revenue_CHF += payment.grossRevenueA
+                                if getattr(payment, 'grossRevenueB', None):
+                                    revenue_CHF += payment.grossRevenueB
+                                if getattr(payment, 'withHoldingTaxClaim', None):
+                                    wthAmount_CHF += payment.withHoldingTaxClaim
+                                if getattr(payment, 'nonRecoverableTaxAmount', None):
+                                    wthAmount_CHF += payment.nonRecoverableTaxAmount
+                            #wthAmount: Optional[Decimal] = None
+                            if revenue_CHF != Decimal('0') or revenue != Decimal('0') or wthAmount_CHF != Decimal('0') or capital_return_CHF != Decimal("0"):
+                                if sec_header_added == False:
+                                     table_data.append(security_header_row)
+                                     security_start_rows.append(current_row)
+                                     current_row += 1
+                                     sec_header_added = True
+
+                                table_data.append([
+                                    Paragraph(payment.paymentDate.strftime("%d.%m.%Y") if payment.paymentDate else '', val_left),
+                                    Paragraph(escape_html_for_paragraph(name or ''), val_left),
+                                    Paragraph(format_stock_quantity(payment.quantity, False, stock_quantity_template, '0'), val_right),
+                                    Paragraph(format_exchange_rate(payment.exchangeRate) if getattr(payment, 'exchangeRate', None) else '', val_right),
+                                    Paragraph(format_currency_2dp(revenue), val_right),
+                                    Paragraph(format_currency_2dp(revenue_CHF), val_right),
+                                    #Paragraph(format_currency_2dp(wthAmount), val_right),
+                                    Paragraph(format_currency_2dp(wthAmount_CHF), val_right),
+                                    Paragraph(format_currency_2dp(capital_return_CHF), val_right),
+                                    Paragraph('', val_right),
+                                    Paragraph('', val_right),
+                                ])
+                                current_row += 1
+                                runningTotals.add_payment(revenue, revenue_CHF, wthAmount_CHF, capital_return_CHF)
+
+                # Separator row - use non-breaking space for height
+                table_data.append([Paragraph('&nbsp;')]*len(table_header))
+                current_row += 1
+
+                runningTotals_diff = runningTotals.get_difference(category_start_totals)
+
+                category_header_row = [
+                    Paragraph('', val_left),
+                    Paragraph(t('total_subfooter2').format(category=category or '', currency=currency or ''), bold_left),
+                    Paragraph('', val_left),
+                    Paragraph('', val_left),
+                    Paragraph(format_currency_2dp(runningTotals_diff.revenue), val_right),
+                    Paragraph(format_currency_2dp(runningTotals_diff.revenueCHF), val_right),
+                    Paragraph(format_currency_2dp(runningTotals_diff.wthCHF), val_right),
+                    Paragraph(format_currency_2dp(runningTotals_diff.capital_return_CHF), val_right),
+                    Paragraph(format_currency_2dp(runningTotals_diff.balance), val_right),
+                    Paragraph(format_currency_2dp(runningTotals_diff.value), val_right),
+                ]
+                table_data.append(category_header_row)
+                footer_total_rows.append(current_row)
+                current_row += 1
+                # Separator row - use non-breaking space for height
+                #table_data.append([Paragraph('&nbsp;')]*len(table_header))
+                #current_row += 1
+                first_category = False
+
+            runningTotals_diff = runningTotals.get_difference(currency_start_totals)
+
+            currency_header_row = [
+                Paragraph('', val_left),
+                Paragraph(t('total_subfooter').format(category=currency or ''), bold_left),
+                Paragraph('', val_left),
+                Paragraph('', val_left),
+                Paragraph(format_currency_2dp(runningTotals_diff.revenue), val_right),
+                Paragraph(format_currency_2dp(runningTotals_diff.revenueCHF), val_right),
+                Paragraph(format_currency_2dp(runningTotals_diff.wthCHF), val_right),
+                Paragraph(format_currency_2dp(runningTotals_diff.capital_return_CHF), val_right),
+                Paragraph(format_currency_2dp(runningTotals_diff.balance), val_right),
+                Paragraph(format_currency_2dp(runningTotals_diff.value), val_right),
+            ]
+            table_data.append(currency_header_row)
+            footer_total_rows.append(current_row)
+            current_row += 1
+            # Separator row - use non-breaking space for height
+            # table_data.append([Paragraph('&nbsp;')]*len(table_header))
+            # current_row += 1
+            first_currency = False
+
+        table_data.append([Paragraph('&nbsp;')]*len(table_header))
+        current_row += 1
+
+        depot_footer_text = t('total_subfooter').format(category=t('depot').format(number=depot.depotNumber or ''))
+        depot_footer_row = [
+            Paragraph('', val_left),
+            Paragraph(depot_footer_text, bold_left),
+            Paragraph('', val_left),
+            Paragraph('', val_left),
+            Paragraph(format_currency_2dp(runningTotals.revenue), val_right),
+            Paragraph(format_currency_2dp(runningTotals.revenueCHF), val_right),
+            Paragraph(format_currency_2dp(runningTotals.wthCHF), val_right),
+            Paragraph(format_currency_2dp(runningTotals.capital_return_CHF), val_right),
+            Paragraph(format_currency_2dp(runningTotals.balance), val_right),
+            Paragraph(format_currency_2dp(runningTotals.value), val_right),
+        ]
+        table_data.append(depot_footer_row)
+        footer_total_rows.append(current_row)
+        current_row += 1
+
+
+    # Table style
+    table_style = [
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 1),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+        ('TOPPADDING', (0, 0), (-1, -1), 0),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        # Footer/total row (row before final separator)
+        ('TOPPADDING', (0, -2), (-1, -2), 1),
+        ('BOTTOMPADDING', (0, -2), (-1, -2), 1),
+        # Header row
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d3d3d3')),
+        ('TOPPADDING', (0, 0), (-1, 0), 1),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 1),
+    ]
+
+    for idx in footer_total_rows:
+        table_style.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#f3f3f3')))
+        table_style.append(('TOPPADDING', (0, idx), (-1, idx), 2))
+        table_style.append(('BOTTOMPADDING', (0, idx), (-1, idx), 2))
+    for idx in category_header_rows:
+        table_style.append(('TOPPADDING', (0, idx), (-1, idx), 3))
+        table_style.append(('BOTTOMPADDING', (0, idx), (-1, idx), 6))
+
+    for idx in security_start_rows:
+        table_style.append(('VALIGN', (2, idx), (-1, idx), 'BOTTOM'))
+        table_style.append(('TOPPADDING', (0, idx), (-1, idx), 2))
+
+    currency_table = Table([table_header] + table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
+    currency_table.setStyle(TableStyle(table_style))
+    return currency_table
+
 # --- Main API function to be called from steuerauszug.py ---
 def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, usable_width):
     report = tax_statement.payment_reconciliation_report
@@ -1876,6 +2228,8 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
         table_header = [
             Paragraph(t('security'), styles['Header_LEFT']),
             Paragraph(t('date'), styles['Header_LEFT']),
+            Paragraph(t('recon_source'), header_style),
+            Paragraph(t('currency'), header_style),
             Paragraph(t('kl_dividend_chf'), header_style),
             Paragraph(t('kl_withholding_chf'), header_style),
             Paragraph(t('broker_dividend'), header_style),
@@ -1886,10 +2240,14 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
         mismatch_rows = []
         expected_rows = []
 
+        row: PaymentReconciliationRow = None
         for idx, row in enumerate(rows, start=1):
+            kursliste_div = ''
             broker_div = ''
+            if row.kursliste_dividend_chf is not None:
+                kursliste_div = format_currency(row.kursliste_dividend_chf)
             if row.broker_dividend_amount is not None:
-                broker_div = f"{format_currency(row.broker_dividend_amount)} {row.broker_dividend_currency or ''}".strip()
+                broker_div = escape_html_for_paragraph(f"{format_currency(row.broker_dividend_amount)} {row.broker_dividend_currency or ''}".strip())
             broker_wht_paragraph = Paragraph('', val_right)
             if row.broker_withholding_amount is not None:
                 broker_wht = f"{format_currency(row.broker_withholding_amount)} {row.broker_withholding_currency or ''}".strip()
@@ -1899,13 +2257,27 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                     broker_wht_markup = f"{broker_wht_markup}<br/><font size=7>{broker_wht_text}</font>"
                 broker_wht_paragraph = Paragraph(broker_wht_markup, val_right)
 
+            #status_mark = '✓?' if row.status in ('match', 'expected') and row.kursliste == False else ('✓' if row.status in ('match', 'expected') else '✗')
             status_mark = '✓' if row.status in ('match', 'expected') else '✗'
+            if row.status != 'match' and row.note:
+                row_note = f"<font size=7>{escape_html_for_paragraph(row.note)}</font>"
+                if row.status == 'expected':
+                    if row.kursliste_undefined:
+                        kursliste_div += f"{"<br/>" if kursliste_div.strip() else ''}{row_note}"
+                    else:
+                        broker_div += f"{"<br/>" if broker_div.strip() else ''}{row_note}"
+                else:
+                    status_mark += f"<br/>{row_note}"
+            if row.status != 'match' and row.kursliste in (None, False) and row.kursliste_security:
+                status_mark += f"<br/><font size=7>{t('sec_is_in_kursliste')}</font>"
             data.append([
                 Paragraph(escape_html_for_paragraph(row.security), val_left),
                 Paragraph(row.payment_date.strftime("%d.%m.%Y"), val_left),
-                Paragraph(format_currency(row.kursliste_dividend_chf), val_right),
+                Paragraph('K' if row.kursliste == True else 'B', val_right),
+                Paragraph(row.kursliste_amount_currency, val_right),
+                Paragraph(kursliste_div, val_right),
                 Paragraph(format_currency(row.kursliste_withholding_chf), val_right),
-                Paragraph(escape_html_for_paragraph(broker_div), val_right),
+                Paragraph(broker_div, val_right),
                 broker_wht_paragraph,
                 Paragraph(status_mark, val_right),
             ])
@@ -1915,7 +2287,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
             elif row.status == 'expected':
                 expected_rows.append(idx)
 
-        col_widths = [usable_width * 0.22, usable_width * 0.12, usable_width * 0.12, usable_width * 0.14, usable_width * 0.14, usable_width * 0.14, usable_width * 0.12]
+        col_widths = [usable_width * 0.21, usable_width * 0.08, usable_width * 0.05, usable_width * 0.07, usable_width * 0.1, usable_width * 0.11, usable_width * 0.12, usable_width * 0.16, usable_width * 0.08]
         table = Table([table_header] + data, colWidths=col_widths, repeatRows=1)
         style = [
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1944,6 +2316,96 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
 
     return flowables
 
+def create_taxvalue_reconciliation_tables(tax_statement: TaxStatement, styles, usable_width):
+    report = tax_statement.payment_reconciliation_report
+    if report is None or not report.tax_value_rows:
+        return []
+
+    val_left = styles['Val_LEFT']
+    val_right = styles['Val_RIGHT']
+    header_style = styles['Header_RIGHT']
+    header_left = styles['Header_LEFT']
+    status_ok = colors.HexColor('#1f7a1f')
+    status_err = colors.HexColor('#b22222')
+    status_exp = colors.HexColor('#8a6d3b')
+
+    col_widths = [usable_width * 0.3, usable_width * 0.1, usable_width * 0.1, usable_width * 0.1, usable_width * 0.15, usable_width * 0.15, usable_width * 0.1]
+
+    grouped = {}
+    for row in report.tax_value_rows:
+        grouped.setdefault(row.country or '??', []).append(row)
+
+    flowables = []
+    for country in sorted(grouped.keys()):
+        rows: List[TaxValueReconciliationRow] = sorted(grouped[country], key=lambda r: (r.security, r.broker_amount_currency))
+        flowables.append(Paragraph(t('reconciliation_taxvalue').format(country=country), styles['h2']))
+
+        table_header = [
+            Paragraph(t('security'), header_left),
+            Paragraph(t('recon_source'), header_left),
+            Paragraph(t('currency'), header_left),
+            Paragraph(t('exchange_rate'), header_style),
+            Paragraph(t('broker_value'), header_style),
+            Paragraph(t('kl_value_chf'), header_style),
+            Paragraph(t('ok'), header_style),
+        ]
+        data = []
+        mismatch_rows = []
+        assert len(col_widths) == len(table_header)
+
+        for idx, row in enumerate(rows, start=1):
+            kursliste_value = ''
+            broker_value = ''
+            if row.kursliste_value_chf is not None:
+                kursliste_value = format_currency_2dp(row.kursliste_value_chf)
+            elif row.kursliste_undefined:
+                kursliste_value = 'n/a'
+            if row.broker_amount is not None:
+                broker_value = format_currency_2dp(row.broker_amount)
+
+            #status_mark = '✓?' if row.status in ('match', 'expected') and row.kursliste == False else ('✓' if row.status in ('match', 'expected') else '✗')
+            status_mark = '✓' if row.status in ('match', 'expected') else '✗'
+            if row.status != 'match' and row.note:
+                status_mark += f"<br/><font size=7>{escape_html_for_paragraph(row.note)}</font>"
+            if row.status != 'match' and row.kursliste in (None, False) and row.kursliste_security:
+                status_mark += f"<br/><font size=7>{t('sec_is_in_kursliste')}</font>"
+            data.append([
+                Paragraph(escape_html_for_paragraph(row.security), val_left),
+                Paragraph('K' if row.kursliste == True else 'B', val_left),
+                Paragraph(row.broker_amount_currency, val_left),
+                Paragraph(format_exchange_rate(row.exchange_rate), val_right),
+                Paragraph(broker_value, val_right),
+                Paragraph(kursliste_value, val_right),
+                Paragraph(status_mark, val_right),
+            ])
+
+            if row.status == 'mismatch':
+                mismatch_rows.append(idx)
+
+        table = Table([table_header] + data, colWidths=col_widths, repeatRows=1)
+        style = [
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d3d3d3')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 1),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 1),
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            # Header row
+            ('TOPPADDING', (0, 0), (-1, 0), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 1),
+        ]
+        for idx in mismatch_rows:
+            style.append(('TEXTCOLOR', (-1, idx), (-1, idx), status_err))
+            style.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#fdecea')))
+        for i, row in enumerate(rows, start=1):
+            if row.status == 'match':
+                style.append(('TEXTCOLOR', (-1, i), (-1, i), status_ok))
+
+        table.setStyle(TableStyle(style))
+        flowables.append(table)
+        flowables.append(Spacer(1, 0.4 * cm))
+
+    return flowables
 
 def render_tax_statement(
     tax_statement: TaxStatement,
@@ -2051,6 +2513,9 @@ def render_tax_statement(
     story.append(Paragraph(t('summary'), title_style))
 
     critical_warnings = tax_statement.critical_warnings or []
+    # do not show warnings if reconciliation is inactive
+    if tax_statement.payment_reconciliation_report is None:
+        critical_warnings = []
 
     if use_minimal_frontpage:
         story.append(create_minimal_placeholder(styles))
@@ -2161,6 +2626,20 @@ def render_tax_statement(
         story.append(Paragraph(t('liabilities_title'), title_style))
         story.append(liabilities_table)
         story.append(Spacer(1, 0.5*cm))
+
+    if tax_statement.listOfSecurities:
+        currency_summary_table = create_currency_summary_table(tax_statement, styles, usable_width)
+        if currency_summary_table:
+            story.append(PageBreak())
+            story.append(Paragraph(t('currency_summary'), title_style))
+            story.append(currency_summary_table)
+            story.append(Spacer(1, 0.5*cm))
+
+    reconciliation_flowables = create_taxvalue_reconciliation_tables(tax_statement, styles, usable_width)
+    if reconciliation_flowables:
+        story.append(PageBreak())
+        story.append(Paragraph(t('reconciliation_taxvalue_kursliste_broker'), title_style))
+        story.extend(reconciliation_flowables)
 
     # Optional payment reconciliation pages before notices/barcode
     reconciliation_flowables = create_payment_reconciliation_tables(tax_statement, styles, usable_width)

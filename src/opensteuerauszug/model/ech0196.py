@@ -26,8 +26,12 @@ from inspect import isclass  # Add import for isclass function
 import logging
 import re
 
-from opensteuerauszug.model.critical_warning import CriticalWarning
-from opensteuerauszug.model.payment_reconciliation import PaymentReconciliationReport
+from ..core.constants import NON_TAXABLE_SIGNS
+
+from ..model.kursliste import Remark
+
+from ..model.critical_warning import CriticalWarning
+from ..model.payment_reconciliation import PaymentReconciliationReport
 
 logger = logging.getLogger(__name__)
 
@@ -1077,6 +1081,10 @@ class SecurityTaxValue(BaseXmlModel):
     undefined: Optional[bool] = Field(default=None, json_schema_extra={'is_attribute': True})
     kursliste: Optional[bool] = Field(default=None, json_schema_extra={'is_attribute': True})
     
+    balanceCurrencyBroker: Optional[CurrencyId] = Field(default=None, exclude=True)
+    balance_CHF: Optional[Decimal] = Field(default=None, exclude=True)
+    exchangeRateKursliste: Optional[Decimal] = Field(default=None, exclude=True)
+
     model_config = {
         "json_schema_extra": {'tag_name': 'taxValue', 'tag_namespace': NS_MAP['eCH-0196']}
     }
@@ -1153,6 +1161,10 @@ class SecurityPayment(BaseXmlModel):
     broker_label_original: Optional[str] = Field(default=None, exclude=True)
     nonRecoverableTaxAmountOriginal: Optional[Decimal] = Field(default=None, exclude=True)
     payment_type_original: Optional[PaymentTypeOriginal] = Field(default=None, exclude=True)
+    reportDate: Optional[date] = Field(default=None, exclude=True)
+    remark: List[Remark] = Field(default=None, exclude=True)
+    # broker amount in CHF
+    amount_CHF: Optional[Decimal] = Field(default=None, exclude=True)
     
     model_config = {
         "json_schema_extra": {'tag_name': 'payment', 'tag_namespace': NS_MAP['eCH-0196']}
@@ -1183,6 +1195,9 @@ class SecurityStock(BaseXmlModel):
     # Opaque helper string that allows importers extra structure. Not used in calculation
     # or in the export.
     orderId: Optional[str] = Field(default=None, exclude=True)
+    corpAction: Optional[bool] = Field(default=None, exclude=True)
+    corpActionPeerIsin: Optional[ISINType] = Field(default=None, exclude=True)
+    settleDate: Optional[date] = Field(default=None, exclude=True)
 
     model_config = {
         "json_schema_extra": {'tag_name': 'stock', 'tag_namespace': NS_MAP['eCH-0196']},
@@ -1229,6 +1244,7 @@ class Security(BaseXmlModel):
     totalAdditionalWithHoldingTaxUSA: Optional[Decimal] = Field(default=None, exclude=True)
     broker_payments: List[SecurityPayment] = Field(default_factory=list, exclude=True)
     is_rights_issue: bool = Field(default=False, exclude=True)
+    kursliste: Optional[bool] = Field(default=None, exclude=True)
     model_config = {
         "json_schema_extra": {'tag_name': 'security', 'tag_namespace': NS_MAP['eCH-0196']}
     }
@@ -1262,7 +1278,22 @@ class Security(BaseXmlModel):
         assert len(truncated) == 60, f"Truncated name length {len(truncated)} != 60"
         
         return truncated
+    
+    def get_payment_and_broker_nontaxable(self) -> List[SecurityPayment]:
+        payment_list: List[SecurityPayment] = self.payment or []
+        if self.broker_payments:
+            broker_nontaxaple_payment = list(p for p in self.broker_payments if p.sign and p.sign in NON_TAXABLE_SIGNS and p.amount_CHF and p.amountCurrency and p.paymentDate)
+            if broker_nontaxaple_payment and len(broker_nontaxaple_payment)>0:
+                payment_list = [payment.model_copy(deep=True) for payment in payment_list]
+                payment_list.extend(broker_nontaxaple_payment)
 
+        return payment_list
+    
+    def get_ident_desc(self) -> str:
+        desc = self.securityName
+        if self.isin:
+            desc = f"{desc} ({self.isin})"
+        return desc
 
 class Depot(BaseXmlModel):
     security: List[Security] = Field(default_factory=list, alias="security", json_schema_extra={'tag_namespace': NS_MAP['eCH-0196']})

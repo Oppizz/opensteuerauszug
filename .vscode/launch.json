@@ -1,0 +1,36 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python Debugger: opensteuerauszug",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "opensteuerauszug.steuerauszug",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\All2025.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "--log-file", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025 mit Vergleich.log", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025 mit Vergleich.pdf"],
+            //"args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\All2025.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "--no-payment-reconciliation", "--log-file", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025.log", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025.pdf"],
+            //"args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Test.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\final_tax_statement.pdf"],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}\\.venv"
+            },
+            "cwd": "${workspaceRoot}",
+            "justMyCode": false
+        },
+        {
+            "name": "Python Debugger: opensteuerauszug kursliste",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "opensteuerauszug.kursliste",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+            "args": ["download", "--year", "2025"],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}\\.venv"
+            },
+            "cwd": "${workspaceRoot}",
+            "justMyCode": false
+        }
+    ]
+}

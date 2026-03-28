@@ -30,9 +30,9 @@ def create_schema(conn):
         )
     """)
     # Add Indexes for securities table
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_valor ON securities (valor_number);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_isin ON securities (isin);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_year ON securities (tax_year);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_valor ON securities (valor_number);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_isin ON securities (isin);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_year ON securities (tax_year);")
 
     # Signs Table
     cursor.execute("""
@@ -44,8 +44,8 @@ def create_schema(conn):
             sign_object_blob BLOB
         )
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_value ON signs (sign_value);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_tax_year ON signs (tax_year);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_value ON signs (sign_value);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_tax_year ON signs (tax_year);")
 
     # DA1 Rates Table
     cursor.execute("""
@@ -58,9 +58,9 @@ def create_schema(conn):
             da1_rate_object_blob BLOB
         )
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_country ON da1_rates (country);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_security_group ON da1_rates (security_group);")
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_tax_year ON da1_rates (tax_year);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_country ON da1_rates (country);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_security_group ON da1_rates (security_group);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_tax_year ON da1_rates (tax_year);")
 
     # Exchange Rates Daily Table - Changed rate from REAL to TEXT for Decimal precision
     cursor.execute("""
@@ -113,6 +113,27 @@ def create_schema(conn):
         ("converter_schema_version", CONVERTER_SCHEMA_VERSION),
     )
     conn.commit()
+
+def create_idx(conn):
+    """Creates the database indexes."""
+    cursor = conn.cursor()
+
+    # Add Indexes for securities table
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_valor ON securities (valor_number);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_isin ON securities (isin, tax_year);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_tax_year ON securities (tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_value ON signs (sign_value);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sign_tax_year ON signs (tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_country ON da1_rates (country, tax_year);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_security_group ON da1_rates (security_group);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_tax_year ON da1_rates (tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exch_rate_d ON exchange_rates_daily (currency_code, date);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exch_rate_m ON exchange_rates_monthly (currency_code);")
+
+    conn.commit()    
 
 def get_attr(elem, attr):
     """Helper to get attribute from an XML element."""
@@ -469,6 +490,9 @@ def convert_kursliste_xml_to_sqlite(
         # Final commit
         flush_batches()
         conn.commit()
+
+        print(f"\nCreating indexes...")
+        create_idx(conn)
 
         # Print summary
         print(f"\nConversion complete:")

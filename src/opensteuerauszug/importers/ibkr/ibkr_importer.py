@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from typing import Final, List, Any, Dict, Literal, Optional, get_args, cast
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -7,21 +8,22 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-from opensteuerauszug.model.position import SecurityPosition
-from opensteuerauszug.model.ech0196 import (
+from ...model.position import SecurityPosition
+from ...model.ech0196 import (
     BankAccountName, ClientNumber, Institution, OrganisationName, SecurityCategory, TaxStatement, ListOfSecurities, ListOfBankAccounts,
     Security, SecurityStock, SecurityPayment,
     BankAccount, BankAccountPayment, BankAccountTaxValue,
     CurrencyId, QuotationType, DepotNumber, BankAccountNumber, Depot, ISINType, Client, CantonAbbreviation
 )
-from opensteuerauszug.core.position_reconciler import PositionReconciler
-from opensteuerauszug.config.models import IbkrAccountSettings
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
+from ...core.position_reconciler import PositionReconciler
+from ...config.models import IbkrAccountSettings
+from ...core.constants import UNINITIALIZED_QUANTITY
 
 IBKR_ASSET_CATEGORY_TO_ECH_SECURITY_CATEGORY: Final[Dict[str, SecurityCategory]] = {
     "STK": "SHARE",
     "BOND": "BOND",
     "OPT": "OPTION",
+    "FOP": "OPTION",
     "FUT": "OTHER",
     "ETF": "FUND",
     "FUND": "FUND",
@@ -88,6 +90,29 @@ class IbkrImporter:
                 f"Empty required field '{field_name}' in {error_desc}."
             )
         return value
+    
+    def _qty_apply_multiplier(self, data_object: Any, quantity: Decimal,
+                              object_description: str) -> Decimal:
+        """Helper to apply multiplier to quantity."""
+        value = getattr(data_object, "assetCategory", None)
+        #multiplier = getattr(data_object, "multiplier", None)
+        quantity_converted = quantity
+        if value == "BOND" and quantity % 1000 == 0:
+            quantity_converted = quantity / 1000
+
+        return quantity_converted
+
+    def _price_apply_multiplier(self, data_object: Any, price: Decimal,
+                              object_description: str) -> Decimal:
+        """Helper to apply multiplier to quantity."""
+        value = getattr(data_object, "assetCategory", None)
+        multiplier = getattr(data_object, "multiplier", None)
+        price_converted = price
+        if value in ["OPT", "FOP"] and multiplier is not None and multiplier != Decimal("1"):
+            multiplier_dec = self._to_decimal(multiplier, "multiplier", object_description)
+            price_converted = price * multiplier_dec
+
+        return price_converted
 
     def _to_decimal(self, value: Any, field_name: str,
                     object_description: str) -> Decimal:
@@ -163,7 +188,7 @@ class IbkrImporter:
             #     f"{self.account_settings_list[0].account_id}"
             # )
 
-    def _aggregate_stocks(self, stocks: List[SecurityStock]) -> List[SecurityStock]:
+    def _aggregate_stocks(self, stocks: List[SecurityStock], prefix: str) -> List[SecurityStock]:
         """Aggregate buy and sell entries on the same date with equal order id if present without reordering."""
 
         aggregated: List[SecurityStock] = []
@@ -182,6 +207,8 @@ class IbkrImporter:
                 ):
                     total_quantity = pending.quantity + stock.quantity
                     if pending.unitPrice != stock.unitPrice:
+                        if (stock.unitPrice is None):
+                            logger.warning(f"Unit price is None for {prefix} on {stock.referenceDate}")
                         pending.unitPrice = (pending.quantity * pending.unitPrice + stock.quantity * stock.unitPrice) / total_quantity
 
                     pending.quantity = total_quantity
@@ -197,6 +224,9 @@ class IbkrImporter:
                         orderId=stock.orderId,
                         balanceCurrency=stock.balanceCurrency,
                         quotationType=stock.quotationType,
+                        corpAction=stock.corpAction,
+                        corpActionPeerIsin=stock.corpActionPeerIsin,
+                        settleDate=stock.settleDate
                     )
             else:
                 if pending:
@@ -305,11 +335,15 @@ class IbkrImporter:
         def _update_security_name_metadata(
             sec_pos: SecurityPosition,
             name: str,
+            symbol: str,
             priority: int,
         ) -> None:
             entry = security_name_metadata[sec_pos]
             if priority > entry['priority']:
-                entry['best_name'] = name
+                name_symbol = name
+                if symbol and name != symbol:
+                    name_symbol = f"{name} ({symbol})"
+                entry['best_name'] = name_symbol
                 entry['priority'] = priority
 
         for stmt in all_flex_statements:
@@ -361,10 +395,14 @@ class IbkrImporter:
                         self._get_required_field(trade, 'quantity', 'Trade'),
                         'quantity', f"Trade {symbol}"
                     )
+                    quantity = self._qty_apply_multiplier(trade, quantity, f"Trade {symbol}")
+                    
                     trade_price = self._to_decimal(
                         self._get_required_field(trade, 'tradePrice', 'Trade'),
                         'tradePrice', f"Trade {symbol}"
                     )
+                    trade_price = self._price_apply_multiplier(trade, trade_price, f"Trade {symbol}")
+
                     trade_money = self._to_decimal(
                         self._get_required_field(trade, 'tradeMoney', 'Trade'),
                         'tradeMoney', f"Trade {symbol}"
@@ -387,7 +425,7 @@ class IbkrImporter:
 
                     # Added ETF, FUND
                     if asset_category not in [
-                        "STK", "OPT", "FUT", "BOND", "ETF", "FUND"
+                        "STK", "OPT", "FUT", "BOND", "ETF", "FUND", "FOP"
                     ]:
                         logger.warning(
                             f"Skipping trade for unhandled asset "
@@ -404,7 +442,7 @@ class IbkrImporter:
                     )
 
                     # Update name metadata (Priority: 8 for Trades)
-                    _update_security_name_metadata(sec_pos, f"{description} ({symbol})", 8)
+                    _update_security_name_metadata(sec_pos, description, symbol, 8)
 
                     # Store assetCategory and subCategory
                     sub_category = getattr(trade, 'subCategory', None)
@@ -423,9 +461,10 @@ class IbkrImporter:
 
                     stock_mutation = SecurityStock(
                         referenceDate=trade_date,
+                        settleDate=settle_date,
                         mutation=True,
                         quantity=quantity,
-                        unitPrice=trade_price if trade_price != Decimal(0) else None,
+                        unitPrice=trade_price if trade_price != Decimal(0) or asset_category in ["OPT", "FOP"] else None,
                         name=buy_sell.value,
                         orderId=trade.ibOrderID,
                         balanceCurrency=currency,
@@ -472,13 +511,14 @@ class IbkrImporter:
                                                  'OpenPosition'),
                         'position', f"OpenPosition {symbol}"
                     )
+                    quantity = self._qty_apply_multiplier(open_pos, quantity, f"OpenPosition {symbol}")
                     currency = self._get_required_field(
                         open_pos, 'currency', 'OpenPosition'
                     )
 
                     # Added ETF, FUND
                     if asset_category not in [
-                        "STK", "OPT", "FUT", "BOND", "ETF", "FUND"
+                        "STK", "OPT", "FUT", "BOND", "ETF", "FUND", "FOP"
                     ]:
                         logger.warning(
                             f"Skipping open position for unhandled "
@@ -496,7 +536,7 @@ class IbkrImporter:
                     )
 
                     # Update name metadata (Priority: 10 for OpenPositions)
-                    _update_security_name_metadata(sec_pos, f"{description} ({symbol})", 10)
+                    _update_security_name_metadata(sec_pos, description, symbol, 10)
 
                     # Store assetCategory and subCategory
                     sub_category = getattr(open_pos, 'subCategory', None)
@@ -569,6 +609,7 @@ class IbkrImporter:
                         self._get_required_field(transfer, 'quantity', 'Transfer'),
                         'quantity', f"Transfer {symbol}"
                     )
+                    quantity = self._qty_apply_multiplier(transfer, quantity, f"Transfer {symbol}")
 
                     direction = transfer.direction
                     direction_val = direction.value.upper() if direction else None
@@ -603,7 +644,7 @@ class IbkrImporter:
                     )
 
                     # Update name metadata (Priority: 5 for Transfers)
-                    _update_security_name_metadata(sec_pos, f"{description} ({symbol})", 5)
+                    _update_security_name_metadata(sec_pos, description, symbol, 5)
 
                     stock_mutation = SecurityStock(
                         referenceDate=tx_date,
@@ -620,6 +661,8 @@ class IbkrImporter:
 
             # --- Process Corporate Actions ---
             if stmt.CorporateActions:
+                action_secpos_map: defaultdict[str, List[tuple[SecurityStock, str]]] = \
+                    defaultdict(lambda: [])
                 for action in stmt.CorporateActions:
                     if should_skip_entry(action, "CorporateAction"):
                         continue
@@ -644,9 +687,13 @@ class IbkrImporter:
                         "quantity",
                         f"CorporateAction {symbol}",
                     )
+                    quantity = self._qty_apply_multiplier(action, quantity, f"CorporateAction {symbol}")
+
                     currency = self._get_required_field(action, "currency", "CorporateAction")
 
                     action_description = getattr(action, "actionDescription", None) or description
+
+                    action_id = getattr(action, "actionID", None)
 
                     sec_pos = SecurityPosition(
                         depot=account_id,
@@ -655,6 +702,17 @@ class IbkrImporter:
                         symbol=conid,
                         description=f"{description} ({symbol})",
                     )
+
+                    issuer_country = self._normalize_country_code(
+                        getattr(action, 'issuerCountryCode', None)
+                    )
+                    if issuer_country:
+                        self._maybe_update_security_country(
+                            security_country_map,
+                            sec_pos,
+                            issuer_country,
+                            "CorporateAction",
+                        )
 
                     # Update name metadata for CorporateActions
                     # Priority logic:
@@ -668,21 +726,21 @@ class IbkrImporter:
                     # - Description > 50 chars: -1 (Don't use if possible, prefer symbol if nothing else)
 
                     issuer = getattr(action, "issuer", None)
-                    ca_name = f"{description} ({symbol})"
+                    #ca_name = f"{description} ({symbol})"
                     ca_priority = 1
 
                     if issuer:
-                        ca_name = f"{issuer} ({symbol})"
+                        ca_name = issuer
                         ca_priority = 4
                     elif len(description) > 50:
                         # Long description and no issuer. Prefer symbol (short name).
-                        ca_name = f"{symbol} ({symbol})"
+                        ca_name = symbol
                         ca_priority = 2
                     else:
-                        ca_name = f"{description} ({symbol})"
+                        ca_name = description
                         ca_priority = 3
 
-                    _update_security_name_metadata(sec_pos, ca_name, ca_priority)
+                    _update_security_name_metadata(sec_pos, ca_name, symbol, ca_priority)
 
                     sub_category = getattr(action, "subCategory", None)
                     if sub_category == "RIGHT":
@@ -695,11 +753,19 @@ class IbkrImporter:
                         name=action_description,
                         balanceCurrency=currency,
                         quotationType="PIECE",
+                        corpAction=True
                     )
 
                     processed_security_positions[sec_pos]["stocks"].append(
                         stock_mutation
                     )
+
+                    if action_id and isin:
+                        action_secpos_map[action_id].append((stock_mutation, isin))
+                for action_id_dummy, stock_mutations in action_secpos_map.items():
+                    if len(stock_mutations)>1:
+                        stock_mutations[0][0].corpActionPeerIsin = ISINType(stock_mutations[1][1])
+                        stock_mutations[1][0].corpActionPeerIsin = ISINType(stock_mutations[0][1])
 
             # --- Process Cash Transactions ---
             if stmt.CashTransactions:
@@ -713,12 +779,15 @@ class IbkrImporter:
                     tx_date = (tx_date_time.date()
                                if hasattr(tx_date_time, 'date')
                                else self._get_required_field(
-                                   cash_tx, 'tradeDate', 'CashTransaction'
+                                   cash_tx, 'tradeDate' if hasattr(cash_tx, 'tradeDate') else 'settleDate', 'CashTransaction'
                                ))
+                    exDate = getattr(cash_tx, 'exDate', None)
+                    reportDate = getattr(cash_tx, 'reportDate', None)
 
                     description = self._get_required_field(
                         cash_tx, 'description', 'CashTransaction'
                     )
+                    description_lower = description.lower()
                     amount = self._to_decimal(
                         self._get_required_field(cash_tx, 'amount',
                                                  'CashTransaction'),
@@ -734,14 +803,17 @@ class IbkrImporter:
                         raise ValueError(f"CashTransaction type is missing for {description}")
 
                     # Skip fees even if they are associated with a security (e.g., ADR fees)
-                    if tx_type in [ibflex.CashAction.FEES, ibflex.CashAction.ADVISORFEES]:
-                        logger.warning(f"Fees paid for {description} are ignored for statement.")
+                    if tx_type in [ibflex.CashAction.FEES, ibflex.CashAction.ADVISORFEES, ibflex.CashAction.COMMADJ]:
+                        #logger.warning(f"Fees paid for {description} are ignored for statement.")
                         continue
 
                     if security_id:
+                        asset_category = self._get_required_field(
+                            cash_tx, 'assetCategory', 'CashTransaction'
+                        )
                         tx_type_str = tx_type.value
                         tx_type_str_lower = str(tx_type_str).lower()
-                        assert 'interest' not in tx_type_str_lower
+                        assert 'interest' not in tx_type_str_lower or (asset_category == 'BOND' and 'bond interest' in tx_type_str_lower)
 
                         sec_pos_key = None
                         for pos in processed_security_positions.keys():
@@ -763,37 +835,51 @@ class IbkrImporter:
                                 ),
                             )
 
+                        sub_category = getattr(cash_tx, 'subCategory', None)
+                        if sec_pos_key not in security_asset_category_map:
+                            security_asset_category_map[sec_pos_key] = (asset_category, sub_category)
+
                         # Update name metadata (Priority: 0 for CashTransactions - lowest)
                         # Use description or symbol if description is generic?
                         # Usually description in CashTx is like "Dividend ...". Not great for security name.
                         # But if it's the only source, it's better than nothing.
                         _update_security_name_metadata(
                             sec_pos_key,
-                            f"{description} ({sym_attr})" if sym_attr else description,
+                            description, sym_attr,
                             0
                         )
 
                         sec_payment = SecurityPayment(
                             paymentDate=tx_date,
+                            exDate=exDate,
+                            reportDate=reportDate,
                             name=description,
                             amountCurrency=currency,
                             amount=amount,
                             quotationType='PIECE',
                             quantity=UNINITIALIZED_QUANTITY,
                             broker_label_original=tx_type_str,
+                            withHoldingTaxClaim = None
                         )
 
                         if tx_type == ibflex.CashAction.PAYMENTINLIEU:
                             sec_payment.securitiesLending = True
 
+                        if tx_type in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU] and description_lower.endswith(" (return of capital)"):
+                            sec_payment.sign = "(KR)"
+
+                        if asset_category == 'BOND' and ((tx_type_str_lower == "bond interest received" and description_lower.startswith("sold accrued int")) or (tx_type_str_lower == "bond interest paid" and description_lower.startswith("purchase accrued int"))):
+                            sec_payment.sign = "(KG)"
+
                         if "withholding" in tx_type_str_lower:
-                            if amount < 0:
+                            #if amount < 0:
                                 if currency == "CHF":
-                                    sec_payment.withHoldingTaxClaim = abs(amount)
+                                    sec_payment.withHoldingTaxClaim = -amount #abs(amount)
                                 else:
-                                    sec_payment.nonRecoverableTaxAmountOriginal = abs(amount)
-                            elif amount > 0:
-                                sec_payment.nonRecoverableTaxAmountOriginal = -amount
+                                    sec_payment.nonRecoverableTaxAmountOriginal = -amount #abs(amount)
+                                sec_payment.amount = Decimal("0")
+                            #elif amount > 0:
+                            #    sec_payment.nonRecoverableTaxAmountOriginal = -amount
                         processed_security_positions[sec_pos_key]['payments'].append(
                             sec_payment
                         )
@@ -812,11 +898,11 @@ class IbkrImporter:
                                 continue
                         elif tx_type in [ibflex.CashAction.FEES]:
                             # TODO: Optionally create a costs sections.
-                            logger.warning(f"Fees paid for {description} are ignored for statement.")
+                            #logger.warning(f"Fees paid for {description} are ignored for statement.")
                             continue
                         elif tx_type in [ibflex.CashAction.ADVISORFEES]:
                             # TODO: Optionally create a costs sections.
-                            logger.warning(f"Fees paid for {description} are ignored for statement.")
+                            #logger.warning(f"Fees paid for {description} are ignored for statement.")
                             continue
                         elif tx_type in [ibflex.CashAction.BROKERINTRCVD]:
                             # Tax relevant event. Fall through to create a bank payment.
@@ -839,13 +925,51 @@ class IbkrImporter:
                             bank_payment
                         )
 
+            # --- Process Dividend Accrual Changes for exdate ---
+            if stmt.ChangeInDividendAccruals:
+                for div_acc in stmt.ChangeInDividendAccruals:
+                    if should_skip_entry(div_acc, "ChangeInDividendAccruals"):
+                        continue
+                    tx_date = self._get_required_field(
+                        div_acc, 'date', 'ChangeInDividendAccruals'
+                    )
+
+                    description = self._get_required_field(
+                        div_acc, 'description', 'ChangeInDividendAccruals'
+                    )
+                    
+                    security_id = div_acc.conid
+                    tx_code = div_acc.code
+                    if tx_code is None or not isinstance(tx_code, tuple) or len(tx_code) == 0:
+                        raise ValueError(f"Code is missing or worng format for {description}")
+                    
+                    if security_id and tx_code[0] in [ibflex.Code.REVERSE]:
+                        exDate = self._get_required_field(
+                            div_acc, 'exDate', 'ChangeInDividendAccruals'
+                        )
+                        pay_date = self._get_required_field(
+                            div_acc, 'payDate', 'ChangeInDividendAccruals'
+                        )
+                        sec_pos_key = None
+                        for pos in processed_security_positions.keys():
+                            if pos.depot == account_id and pos.symbol == str(security_id):
+                                sec_pos_key = pos
+                                break
+                        if sec_pos_key:
+                            payments = processed_security_positions[sec_pos_key]['payments']
+                            if payments and len(payments)>0:
+                                div_payments = (p for p in payments if p.broker_label_original in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU, ibflex.CashAction.WHTAX] and (not hasattr(p, 'exDate') or p.exDate == None) and p.paymentDate == pay_date)
+                                for p in div_payments:
+                                    p.exDate = exDate
+                
         # --- Construct ListOfSecurities ---
         # account_id -> list of Security objects
         depot_securities_map: defaultdict[str, List[Security]] = defaultdict(list)
+        rights_issue_cleanup_map: defaultdict[str, List[Security]] = defaultdict(list)
         sec_pos_idx = 0
         for sec_pos_obj, data in processed_security_positions.items():
             sec_pos_idx += 1
-            sorted_stocks = self._aggregate_stocks(data['stocks'])
+            sorted_stocks = self._aggregate_stocks(data['stocks'], f"{sec_pos_obj.symbol}/{sec_pos_obj.isin} ({sec_pos_obj.description})")
             sorted_payments = sorted(
                 data['payments'], key=lambda p: p.paymentDate
             )
@@ -891,6 +1015,7 @@ class IbkrImporter:
             end_plus_one = self.period_to + timedelta(days=1)
             end_pos = reconciler.synthesize_position_at_date(end_plus_one)
             closing_balance = end_pos.quantity if end_pos else Decimal("0")
+            closing_value = end_pos.balance if end_pos and end_pos.balance is not None else None
 
             trades_quantity_total = sum(
                 s.quantity for s in sorted_stocks if s.mutation
@@ -905,7 +1030,7 @@ class IbkrImporter:
 
             if opening_balance < 0 or closing_balance < 0:
                 if asset_cat == "OPT" and (sub_category == "C" or sub_category == "P"):
-                    logger.warning(
+                    logger.debug(
                         f"Negative balance computed for security {sec_pos_obj.symbol} with {asset_cat}/{sub_category}. In case you expect short positions, this is fine. Otherwise, please report this to the developers for further investigation."
                         f" (start {opening_balance}, end {closing_balance})"
                     )
@@ -959,6 +1084,7 @@ class IbkrImporter:
                         mutation=False,
                         quotationType=primary_quotation_type,
                         quantity=closing_balance,
+                        balance=closing_value,
                         balanceCurrency=primary_currency,
                         name="Closing balance"
                     )
@@ -981,6 +1107,14 @@ class IbkrImporter:
                 else:
                     final_security_name = sec_pos_obj.symbol
 
+            country = security_country_map.get(sec_pos_obj, None)
+            if country == "XX" and sec_pos_obj.isin and len(sec_pos_obj.isin) >= 2:
+                isin_start = sec_pos_obj.isin[:2].upper()
+                if re.fullmatch(r'[A-Z]{2}', isin_start):
+                    country = isin_start
+            if country is None:
+                country = "US"
+
             sec = Security(
                 positionId=sec_pos_idx,
                 currency=primary_currency,
@@ -989,7 +1123,7 @@ class IbkrImporter:
                 securityName=final_security_name,
                 isin=ISINType(sec_pos_obj.isin) if sec_pos_obj.isin is not None else None,
                 valorNumber=sec_pos_obj.valor,
-                country=security_country_map.get(sec_pos_obj, "US"),
+                country=country,
                 stock=sorted_stocks,
                 payment=sorted_payments
             )
@@ -999,6 +1133,46 @@ class IbkrImporter:
 
             depot_securities_map[sec_pos_obj.depot].append(sec)
 
+            if is_rights_issue and opening_balance == 0 and closing_balance == 0 and sec.country=="CH" and sec.payment and len(sec.payment) > 0 and (sec.stock == None or sum(1 for s in sec.stock if s.corpAction in (None, False)) <= 1):
+                rights_issue_cleanup_map[sec_pos_obj.depot].append(sec)
+
+        # reassign payments for rights issues to original security positions if they were assigned to a separate position based on the description in the cash transaction. 
+        # This is needed to properly link the payment to the security position and to match kursliste.
+        if rights_issue_cleanup_map and len(rights_issue_cleanup_map) > 0:
+            for depot_id, securities_in_depot in rights_issue_cleanup_map.items():
+                for sec in securities_in_depot:
+                    paym_to_remove: List[SecurityPayment] = []
+                    for payment in sec.payment:
+                        if payment.broker_label_original in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU, ibflex.CashAction.WHTAX]:
+                            # Try to find a matching security position based on description containing the isin
+                            p = re.compile(f".*\\(({sec.country}[0-9A-Z]+)\\).*")
+                            found_action_match = False
+                            for s in sec.stock:
+                                if s.corpAction:
+                                    matching_isin: ISINType = None
+                                    match_type = "isin from matching action id"
+                                    if s.corpActionPeerIsin:
+                                        matching_isin = s.corpActionPeerIsin
+                                    else:
+                                        m = p.match(s.name.upper())
+                                        if m:
+                                            matching_isin = ISINType(m.group(1))
+                                            match_type = "description"
+                                    if matching_isin and matching_isin != sec.isin:
+                                        for matching_sec in depot_securities_map[depot_id]:
+                                            if matching_sec.isin == matching_isin and matching_sec.positionId != sec.positionId and matching_sec.currency == s.balanceCurrency:
+                                                reconciler = PositionReconciler(matching_sec.stock, identifier=f"{matching_sec.isin or 'SEC'}-rights_issues")
+                                                pos = reconciler.synthesize_position_at_date(s.referenceDate, assume_zero_if_no_balances=True, security=matching_sec)
+                                                if pos and pos.quantity == s.quantity:
+                                                    logger.warning(f"Reassigning payment '{payment.broker_label_original}' with value {payment.amount} from {payment.paymentDate} rights issue security {sec.isin} to security {matching_sec.isin} based on corp action {match_type}")
+                                                    matching_sec.payment.append(payment)
+                                                    paym_to_remove.append(payment)
+                                                    found_action_match = True
+                                                    break
+                                if found_action_match:
+                                    break
+                    for p in paym_to_remove:
+                        sec.payment.remove(p)
         final_depots = []
         if depot_securities_map:
             for depot_id, securities_in_depot in depot_securities_map.items():
