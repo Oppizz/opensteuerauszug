@@ -9,9 +9,7 @@
             "module": "opensteuerauszug.steuerauszug",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-            "args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\All2025.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "--log-file", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025 mit Vergleich.log", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025 mit Vergleich.pdf"],
-            //"args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\All2025.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "--no-payment-reconciliation", "--log-file", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025.log", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Steuerauszug IBKR 2025.pdf"],
-            //"args": ["C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\Test.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "-o", "C:\\Users\\ChristianOppliger\\Oppi\\Daten - Finanzen\\Steuern\\2025\\Aktien\\final_tax_statement.pdf"],
+            "args": ["c:\\path_to_ibkr\\All2025.xml", "--importer", "ibkr", "--broker", "ibkr", "--tax-year", "2025", "--tax-calculation-level", "broker_fillin", "--skip-broker-payments-from-reconciliation", "--log-file", "C:\\path_to_log\\Steuerauszug IBKR 2025 mit Vergleich.log", "-o", "C:\\path_to_pdf\\Steuerauszug IBKR 2025 mit Vergleich.pdf"],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}\\.venv"
             },
