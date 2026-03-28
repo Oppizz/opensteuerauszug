@@ -8,6 +8,10 @@ language = "de" # Default language
 detect_foreign_income = true
 summarize_by_category = true
 
+[calculate]
+summarize_options = true
+remove_zero_positions = true
+
 # 2. Broker-level Settings / Overrides
 [brokers.schwab]
 # You could override general settings here for all Schwab accounts, e.g.:
