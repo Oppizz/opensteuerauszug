@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opensteuerauszug"
-version = "0.1.0"
+version = "0.1.0+oppizz.vendored"
 description = "Generate Swiss tax statements from financial data."
 readme = "README.md"
 requires-python = ">=3.10"

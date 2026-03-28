@@ -116,9 +116,12 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
 
         reconciler = PositionReconciler(stock, identifier=f"{security.isin or 'SEC'}-payments")
 
-        accessor = self.kursliste_manager.get_kurslisten_for_year(
+        ref_year = (
             security.taxValue.referenceDate.year
+            if security.taxValue and security.taxValue.referenceDate
+            else security.stock[-1].referenceDate.year
         )
+        accessor = self.kursliste_manager.get_kurslisten_for_year(ref_year)
 
         for pay in payment_list:
             if not pay.paymentDate:

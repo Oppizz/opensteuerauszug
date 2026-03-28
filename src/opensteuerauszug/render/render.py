@@ -2012,7 +2012,7 @@ def create_currency_summary_table(tax_statement: TaxStatement, styles, usable_wi
                 security: Security
                 for security in securities:
                     tax_value = security.taxValue
-                    if currency != (security.taxValue.balanceCurrencyBroker or security.taxValue.balanceCurrency or security.currency or '?'):
+                    if currency != ((tax_value and (tax_value.balanceCurrencyBroker or tax_value.balanceCurrency)) or security.currency or '?'):
                         tax_value = None
                     precision = find_minimal_decimals(security.nominalValue)
                     if getattr(security, 'payment', None):
