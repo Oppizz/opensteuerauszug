@@ -1,5 +1,5 @@
 """OpenSteuerAuszug - A Python package for handling and processing Swiss tax statements."""
-__version__ = "0.1.0"
+__version__ = "0.1.0+oppizz.vendored"
 
 from .logging_utils import setup_logging
 
