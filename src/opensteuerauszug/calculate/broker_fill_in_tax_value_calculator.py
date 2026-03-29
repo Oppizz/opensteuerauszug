@@ -131,6 +131,10 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
             if pay.amount is None or pay.amount == Decimal("0"):
                 continue
 
+            # witholding position without amount is for reconciliation only
+            if (pay.withHoldingTaxClaim or pay.nonRecoverableTaxAmountOriginal) and -pay.amount == (pay.withHoldingTaxClaim or pay.nonRecoverableTaxAmountOriginal):
+                continue
+
             # Capital gains are not relevant for personal income tax and can be omitted.
             if hasattr(pay, "capitalGain") and pay.capitalGain:
                 continue

@@ -796,7 +796,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         if da1_rate and da1_rate.value and da1_rate.value != 0 and not da1_rate.country in ("CH", "US"):
             for pay in security.broker_payments:
                 # find any tax record on the same date
-                if pay.paymentDate == pay_date and (hasattr(pay, "amount") == False or pay.amount == Decimal("0")) and hasattr(pay, "nonRecoverableTaxAmountOriginal") and pay.nonRecoverableTaxAmountOriginal > Decimal("0"):
+                if pay.paymentDate == pay_date and pay.amount and pay.nonRecoverableTaxAmountOriginal and pay.amount == -pay.nonRecoverableTaxAmountOriginal:
                     return True
             logger.warning(f"DA-1 rate of {da1_rate.value}% for country {da1_rate.country} is available, but no taxable broker payment found on the same date {pay_date} for security '{security.get_ident_desc()}'. DA-1 will not be applied.")
             return False

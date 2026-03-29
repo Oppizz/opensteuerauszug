@@ -2252,6 +2252,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
     status_ok = colors.HexColor('#1f7a1f')
     status_err = colors.HexColor('#b22222')
     status_exp = colors.HexColor('#8a6d3b')
+    status_cap = colors.HexColor('#0066cc')
 
     grouped = {}
     for row in report.rows:
@@ -2276,6 +2277,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
         data = []
         mismatch_rows = []
         expected_rows = []
+        capped_rows = []
 
         row: PaymentReconciliationRow = None
         for idx, row in enumerate(rows, start=1):
@@ -2295,7 +2297,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                 broker_wht_paragraph = Paragraph(broker_wht_markup, val_right)
 
             #status_mark = '✓?' if row.status in ('match', 'expected') and row.kursliste == False else ('✓' if row.status in ('match', 'expected') else '✗')
-            status_mark = '✓' if row.status in ('match', 'expected') else '✗'
+            status_mark = '✓' if row.status in ('match', 'expected', 'capped') else '✗'
             if row.status != 'match' and row.note:
                 row_note = f"<font size=7>{escape_html_for_paragraph(row.note)}</font>"
                 if row.status == 'expected':
@@ -2307,6 +2309,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                     status_mark += f"<br/>{row_note}"
             if row.status != 'match' and row.kursliste in (None, False) and row.kursliste_security:
                 status_mark += f"<br/><font size=7>{t('sec_is_in_kursliste')}</font>"
+            status_cell = Paragraph(status_mark, val_right)
             data.append([
                 Paragraph(escape_html_for_paragraph(row.security), val_left),
                 Paragraph(row.payment_date.strftime("%d.%m.%Y"), val_left),
@@ -2316,13 +2319,15 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                 Paragraph(format_currency(row.kursliste_withholding_chf), val_right),
                 Paragraph(broker_div, val_right),
                 broker_wht_paragraph,
-                Paragraph(status_mark, val_right),
+                status_cell,
             ])
 
             if row.status == 'mismatch':
                 mismatch_rows.append(idx)
             elif row.status == 'expected':
                 expected_rows.append(idx)
+            elif row.status == 'capped':
+                capped_rows.append(idx)
 
         col_widths = [usable_width * 0.21, usable_width * 0.08, usable_width * 0.05, usable_width * 0.07, usable_width * 0.1, usable_width * 0.11, usable_width * 0.12, usable_width * 0.16, usable_width * 0.08]
         table = Table([table_header] + data, colWidths=col_widths, repeatRows=1)
@@ -2343,6 +2348,9 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
         for idx in expected_rows:
             style.append(('TEXTCOLOR', (-1, idx), (-1, idx), status_exp))
             style.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#fff6dd')))
+        for idx in capped_rows:
+            style.append(('TEXTCOLOR', (-1, idx), (-1, idx), status_cap))
+            style.append(('BACKGROUND', (0, idx), (-1, idx), colors.HexColor('#e6f0ff')))
         for i, row in enumerate(rows, start=1):
             if row.status == 'match':
                 style.append(('TEXTCOLOR', (-1, i), (-1, i), status_ok))
