@@ -180,6 +180,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                             payment=[]
                         )
                         d.security.append(sec)
+                        self._removed_sec_identifiers.append(self._get_sec_identifier(sec))   # add the summarized position to the removed list to avoid kursliste warning, even though it's not technically removed
                         sec_pos_idx += 1
                 self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(d.security))}")
                         
