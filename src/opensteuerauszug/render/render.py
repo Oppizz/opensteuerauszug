@@ -28,7 +28,7 @@ from reportlab.lib.pagesizes import A4, landscape
 import logging
 
 # --- Import TaxStatement model ---
-from ..model.ech0196 import Depot, SecurityPayment, TaxStatement, Security
+from ..model.ech0196 import Depot, SecurityCategory, SecurityPayment, TaxStatement, Security
 from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
 from ..model.payment_reconciliation import PaymentReconciliationRow, TaxValueReconciliationRow
 
@@ -1666,11 +1666,24 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
         current_row += 1
 
         # Sort by country first if security type is DA1, then by valor number and name
-        def securities_in_depot_sort_key(s):
+        def securities_in_depot_sort_key(s: Security):
             country = (s.country if s.country is not None else '',) if security_type == "DA1" else ()
+            category = ''
+            match s.securityCategory or '':
+                case "SHARE":
+                    category = '1_SHARE'
+                case "FUND":
+                    category = '2_FUND'
+                case "BOND":
+                    category = '3_BOND'
+                case "OPTION":
+                    category = '4_OPTION'
+                case _:
+                    if s.securityCategory is not None:
+                        category = f'5_{s.securityCategory}'
             valor = int(s.valorNumber) if s.valorNumber is not None else 0
             name = s.securityName if s.securityName is not None else ''
-            return country + (valor, name)
+            return country + (category, valor, name)
 
         securities_in_depot.sort(key=securities_in_depot_sort_key)
         previous_country = None
