@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, List, Set
 from datetime import date
@@ -7,8 +8,8 @@ from ..core.exchange_rate_provider import ExchangeRateProvider
 from ..core.kursliste_exchange_rate_provider import KurslisteExchangeRateProvider
 from ..core.kursliste_manager import KurslisteManager
 from ..core.flag_override_provider import FlagOverrideProvider
-from ..model.ech0196 import ISINType, Security, SecurityTaxValue, SecurityPayment, PaymentTypeOriginal
-from ..model.kursliste import PaymentBond, PaymentTypeESTV, SecurityGroupESTV, Da1Rate, Security as KurslisteSecurity
+from ..model.ech0196 import Security, SecurityTaxValue, SecurityPayment, SecurityStock, PaymentTypeOriginal, ISINType
+from ..model.kursliste import PaymentTypeESTV, SecurityGroupESTV, Da1Rate, PaymentBond, Security as KurslisteSecurity
 from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
 from ..core.position_reconciler import PositionReconciler
 from ..core.constants import WITHHOLDING_TAX_RATE
@@ -17,6 +18,23 @@ from .minimal_tax_value import MinimalTaxValueCalculator
 from ..util.converters import security_tax_value_to_stock
 
 logger = logging.getLogger(__name__)
+
+
+def _next_business_day(d: date) -> date:
+    """Return the next business day after ``d``, skipping weekends."""
+    next_day = d + timedelta(days=1)
+    while next_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        next_day += timedelta(days=1)
+    return next_day
+
+
+def _has_intervening_event(d1: date, d2: date, event_dates: Set[date]) -> bool:
+    """Return True if any date in *event_dates* falls strictly between *d1* and *d2*."""
+    if d1 == d2:
+        return False
+    lo, hi = (d1, d2) if d1 < d2 else (d2, d1)
+    return any(lo < d < hi for d in event_dates)
+
 
 # Known sign types that we explicitly handle. Any sign not in this set will raise an error.
 # Signs are defined in the ESTV Kursliste and have specific tax treatment meanings.
@@ -279,6 +297,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         valor_number_new: Optional[int],
         is_gratis: bool = False,
         payment_date=None,
+        all_tax_event_dates: Optional[Set[date]] = None,
     ) -> None:
         """Validate that a stock split is correctly reflected in the imported mutations.
 
@@ -301,8 +320,14 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
         For stock dividends (gratis=True), the mutation typically occurs on the
         payment date rather than the effective date.
+
+        Fallback date matching is supported: if no mutation is found on the primary
+        date, the validator also checks the alternative date (ex-date vs. pay-date)
+        and the next business day after the primary date, provided no other tax
+        event for this security falls between those dates.
         """
         sec_ident = security.isin or security.securityName
+        peer_isin: ISINType = None
 
         # When valorNumberNew points to the same security (e.g. Kursliste records the
         # new valor as identical to the existing one), treat it as a same-ISIN split.
@@ -315,16 +340,67 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
         # For stock dividends (gratis), the mutation typically occurs on the payment
         # date rather than the effective date (ex-date).
-        mutation_date = payment_date if is_gratis and payment_date else reconciliation_date
+        primary_date = payment_date if is_gratis and payment_date else reconciliation_date
 
-        mutations_on_date = [
-            stock
-            for stock in security.stock
-            if stock.mutation and stock.referenceDate == mutation_date and stock.corpAction
-        ]
+        # Build ordered list of candidate dates to search for matching mutations.
+        # Fallback dates are only considered when no other tax event for this security
+        # falls strictly between the primary date and the candidate date.
+        # Exclude the current event's own dates so they don't block fallback matching
+        # within the same event window.
+        current_event_dates: Set[date] = {
+            d for d in (reconciliation_date, payment_date) if d is not None
+        }
+        event_dates: Set[date] = (all_tax_event_dates or set()) - current_event_dates
+        candidate_dates = [primary_date]
+
+        # Alternative date: paydate <-> exdate swap
+        alt_date = reconciliation_date if is_gratis else payment_date
+        if alt_date and alt_date != primary_date and not _has_intervening_event(
+            primary_date, alt_date, event_dates
+        ):
+            candidate_dates.append(alt_date)
+
+        # Next business day after the primary date
+        next_bday = _next_business_day(primary_date)
+        if next_bday not in candidate_dates and not _has_intervening_event(
+            primary_date, next_bday, event_dates
+        ):
+            candidate_dates.append(next_bday)
+
+        # Find mutations on the first matching candidate date
+        mutation_date = primary_date
+        mutations_on_date: List[SecurityStock] = []
+        for candidate in candidate_dates:
+            found = [
+                stock
+                for stock in security.stock
+                if stock.mutation and stock.referenceDate == candidate and stock.corpAction
+            ]
+            if found:
+                if candidate != primary_date:
+                    logger.debug(
+                        "Found %s mutation for %s on fallback date %s (primary was %s).",
+                        "stock dividend" if is_gratis else "stock split",
+                        sec_ident,
+                        candidate,
+                        primary_date,
+                    )
+                mutation_date = candidate
+                mutations_on_date = found
+                break
 
         event_type = "stock dividend" if is_gratis else "stock split"
-        peer_isin: ISINType = None
+
+        # Resolve the Kursliste year for cross-ISIN lookups even when the old
+        # security has no year-end taxValue (fully replaced during the year).
+        split_lookup_year = None
+        if security.taxValue and security.taxValue.referenceDate:
+            split_lookup_year = security.taxValue.referenceDate.year
+        elif payment_date is not None:
+            split_lookup_year = payment_date.year
+        elif reconciliation_date is not None:
+            split_lookup_year = reconciliation_date.year
+
         if valor_number_new is None:
             expected_removal = -quantity
             for m in mutations_on_date:
@@ -397,16 +473,8 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     new_security = sec
                     break
 
-            if (
-                new_security is None
-                and valor_number_new
-                and self.kursliste_manager
-                and security.taxValue
-                and security.taxValue.referenceDate
-            ):
-                accessor = self.kursliste_manager.get_kurslisten_for_year(
-                    security.taxValue.referenceDate.year
-                )
+            if new_security is None and self.kursliste_manager and split_lookup_year is not None and valor_number_new:
+                accessor = self.kursliste_manager.get_kurslisten_for_year(split_lookup_year)
                 if accessor:
                     new_kl_security = accessor.get_security_by_valor(int(valor_number_new))
                     if new_kl_security and new_kl_security.isin:
@@ -435,16 +503,24 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 return
 
             new_sec_ident = new_security.isin or new_security.securityName
-            new_mutations_on_date = [
-                stock
-                for stock in new_security.stock
-                if stock.mutation and stock.referenceDate == mutation_date and stock.corpAction
-            ]
+            # Search for the addition mutation using the same candidate dates as the removal.
+            new_mutation_date = mutation_date
+            new_mutations_on_date: List[SecurityStock] = []
+            for candidate in candidate_dates:
+                found = [
+                    stock
+                    for stock in new_security.stock
+                    if stock.mutation and stock.referenceDate == candidate and stock.corpAction
+                ]
+                if found:
+                    new_mutation_date = candidate
+                    new_mutations_on_date = found
+                    break
             if not new_mutations_on_date:
                 msg = (
                     f"{event_type.capitalize()} with ISIN change for {sec_ident} on "
-                    f"{mutation_date}: the new security "
-                    f"{new_sec_ident} ({valor_number_or_isin_new_desc}) has no "
+                    f"{primary_date}: the new security "
+                    f"{new_sec_ident} (valor {valor_number_new}) has no "
                     f"mutations on the split date. Expected an addition of "
                     f"{expected_addition} shares (split ratio "
                     f"{ratio_new}:{ratio_present}, pre-split position "
@@ -460,7 +536,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             if expected_addition not in new_mutation_quantities:
                 msg = (
                     f"{event_type.capitalize()} with ISIN change for {sec_ident} on "
-                    f"{mutation_date}: the new security "
+                    f"{new_mutation_date}: the new security "
                     f"{new_sec_ident} ({valor_number_or_isin_new_desc}) has "
                     f"mutations with quantities "
                     f"{sorted(new_mutation_quantities)} on the split date, "
@@ -529,6 +605,16 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             else security.stock[-1].referenceDate.year
         )
         accessor = self.kursliste_manager.get_kurslisten_for_year(ref_year)
+
+        # Pre-compute all tax-event dates across this security's payments so that
+        # _validate_stock_split can skip fallback dates that would cross another event.
+        all_kl_tax_event_dates: Set[date] = {
+            d
+            for p in payments
+            if p.paymentDate and p.taxEvent
+            for d in (p.exDate, p.paymentDate)
+            if d is not None
+        }
 
         for pay in payments:
             if not pay.paymentDate:
@@ -606,6 +692,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                             valor_number_new=valor_number_new,
                             is_gratis=is_gratis,
                             payment_date=pay.paymentDate,
+                            all_tax_event_dates=all_kl_tax_event_dates,
                         )
 
                     if pay.paymentValueCHF in (None, Decimal("0")) and pay.paymentValue in (
