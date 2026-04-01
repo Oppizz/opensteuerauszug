@@ -33,7 +33,7 @@ class _BrokerAgg:
     withholding_entry_text: Optional[str] = None
     allows_broker_above_kursliste: bool = False
     exchange_rate: Optional[Decimal] = None
-
+    wth_correction_late_date: Optional[date] = None
 
 @dataclass
 class _KurslisteAgg:
@@ -83,6 +83,8 @@ class PaymentReconciliationCalculator:
         self.tolerance_frac = tolerance_frac
         self.skip_broker_payment = False
         self.language=DEFAULT_LANGUAGE
+        self.periodFrom: Optional[date] = None
+        self.periodTo: Optional[date] = None
 
     def calculate(self, tax_statement: TaxStatement) -> TaxStatement:
         report = PaymentReconciliationReport()
@@ -90,6 +92,9 @@ class PaymentReconciliationCalculator:
         if not tax_statement.listOfSecurities or not tax_statement.listOfSecurities.depot:
             tax_statement.payment_reconciliation_report = report
             return tax_statement
+        
+        self.periodFrom = tax_statement.periodFrom
+        self.periodTo = tax_statement.periodTo
 
         for depot in tax_statement.listOfSecurities.depot:
             for security in depot.security:
@@ -236,9 +241,12 @@ class PaymentReconciliationCalculator:
                 )
                 if not div_ok:
                     broker_dividend_amount_curr = (broker_dividend_amount_curr or Decimal("0")) - broker.dividend_capital_gain
-                    note = "Broker dividend is below Kursliste value beyond tolerance."
+                    note = "Broker div is below Kursliste value."
                 elif not w_ok:
-                    note = "Broker withholding is below Kursliste value beyond tolerance."
+                    if broker.wth_correction_late_date is not None:
+                        note = f"Broker wth is below Kursliste value; late correction detected on {broker.wth_correction_late_date}."
+                    else:
+                        note = "Broker wth is below Kursliste value."
                 matched = div_ok and w_ok
                 status = "match" if matched else "mismatch"
             elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
@@ -339,6 +347,12 @@ class PaymentReconciliationCalculator:
         non_recoverable_original = payment.nonRecoverableTaxAmountOriginal
         withholding_claim = payment.withHoldingTaxClaim
 
+        if agg.exchange_rate is None and payment.exchangeRate is not None:
+            agg.exchange_rate = payment.exchangeRate
+
+        if payment.reportDate > self.periodTo and agg.wth_correction_late_date is None:
+            agg.wth_correction_late_date = payment.reportDate
+
         if withholding_claim is not None and withholding_claim != 0:
             agg.withholding += withholding_claim
             agg.withholding_currency = "CHF"
@@ -354,9 +368,6 @@ class PaymentReconciliationCalculator:
         amount = payment.amount or Decimal("0")
         agg.dividend += amount
         agg.dividend_currency = payment.amountCurrency
-
-        if agg.exchange_rate is None and payment.exchangeRate is not None:
-            agg.exchange_rate = payment.exchangeRate
 
     def _accumulate_kursliste(self, agg: _KurslisteAgg, payment: SecurityPayment) -> None:
         agg.dividend_chf += (payment.grossRevenueA or Decimal("0")) + (payment.grossRevenueB or Decimal("0"))

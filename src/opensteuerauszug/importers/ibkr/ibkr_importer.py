@@ -429,6 +429,8 @@ class IbkrImporter:
                 if tx_type != ibflex.CashAction.WHTAX:
                     continue
 
+                reportDate = getattr(cash_tx, 'reportDate', None)
+
                 description = self._get_required_field(
                     cash_tx,
                     'description',
@@ -462,14 +464,17 @@ class IbkrImporter:
                     )
                     continue
 
+                sec_payment = self._build_security_payment(
+                    payment_date=settle_date,
+                    description=description,
+                    currency=currency,
+                    amount=amount,
+                    tx_type=tx_type,
+                )
+                sec_payment.reportDate = reportDate
+                
                 processed_security_positions[sec_pos_key]['payments'].append(
-                    self._build_security_payment(
-                        payment_date=settle_date,
-                        description=description,
-                        currency=currency,
-                        amount=amount,
-                        tx_type=tx_type,
-                    )
+                    sec_payment
                 )
                 corrections_count += 1
 
