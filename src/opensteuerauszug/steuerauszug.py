@@ -490,6 +490,8 @@ def process(
                     tax_value_calculator.reconciliation_active = False
                 if config_manager.calculate_settings.summarize_options:
                     tax_value_calculator.summarize_options = True
+                if config_manager.calculate_settings.remove_offsetting_payments:
+                    tax_value_calculator.remove_offsetting_payments = True
                 statement = tax_value_calculator.calculate(statement)
                 print(f"{calculator_name} finished. Modified fields: {len(tax_value_calculator.modified_fields) if tax_value_calculator.modified_fields else '0'}, Errors: {len(tax_value_calculator.errors)}")
                 dump_debug_model(current_phase.value + f"_after_{calculator_name.lower()}", statement)

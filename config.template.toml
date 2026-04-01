@@ -11,6 +11,7 @@ summarize_by_category = true
 [calculate]
 summarize_options = true
 remove_zero_positions = true
+remove_offsetting_payments = true
 
 # 2. Broker-level Settings / Overrides
 [brokers.schwab]

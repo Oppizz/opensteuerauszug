@@ -45,6 +45,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
         self.remove_zero_positions = False
         self.reconciliation_active = True
         self.summarize_options = False
+        self.remove_offsetting_payments = False
         self._removed_sec_identifiers: List[str] = []
         self._current_account_is_type_A = None
         self._current_security_is_type_A = None
@@ -95,6 +96,9 @@ class MinimalTaxValueCalculator(BaseCalculator):
 
         if self.summarize_options:
             self._summarize_positions(tax_statement)
+
+        if self.remove_offsetting_payments:
+            self._remove_offsetting_payments(tax_statement)
 
         super().calculate(tax_statement)
 
@@ -183,7 +187,55 @@ class MinimalTaxValueCalculator(BaseCalculator):
                         self._removed_sec_identifiers.append(self._get_sec_identifier(sec))   # add the summarized position to the removed list to avoid kursliste warning, even though it's not technically removed
                         sec_pos_idx += 1
                 self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(d.security))}")
+
+    def _remove_offsetting_payments(self, tax_statement: TaxStatement):
+        """Remove payments that cancel each other out on the same day."""
+        self.logger.info("Removing offsetting payments:")
+        if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
+            total_removed = 0
+            for d in tax_statement.listOfSecurities.depot:
+                for sec in d.security:
+                    if sec.payment:
+                        payments_by_date = defaultdict(list)
+                        for p in sec.payment:
+                            payments_by_date[(p.paymentDate,p.exDate,p.payment_type_original or "", p.sign or "", p.amountCurrency or "", p.quantity)].append(p)
                         
+                        filtered_payments = []
+                        for payment_key, payments in payments_by_date.items():
+                            payment_date = payment_key[0]
+                            # Group payments by relevant fields to find offsetting pairs
+                            if len(payments) > 1:
+                                payments_check = payments.copy()
+                                for p in payments_check:
+                                    if p in payments:
+                                        # Look for an offsetting payment
+                                        offsetting = next((op for op in payments if op != p and 
+                                            op.payment_type_original == p.payment_type_original and
+                                            op.sign == p.sign and
+                                            op.amountCurrency == p.amountCurrency and
+                                            op.quantity == p.quantity and
+                                            op.amount == (-p.amount if p.amount is not None else None) and
+                                            op.withHoldingTaxClaim == (-p.withHoldingTaxClaim if p.withHoldingTaxClaim is not None else None)
+                                        ), None)
+                                        if offsetting:
+                                            payments.remove(p)
+                                            payments.remove(offsetting)
+                                if payments:
+                                    filtered_payments.extend(payments)
+                                
+                                cur_removed = len(payments_check) - len(payments)
+                                if cur_removed > 0:
+                                    total_removed += cur_removed
+                                    self.logger.debug(
+                                        f"  - Removing {cur_removed} offsetting {sec.securityName} "
+                                        f"payment(s) on {payment_date}"
+                                    )
+                            else:
+                                filtered_payments.extend(payments)
+                            
+                        sec.payment = filtered_payments
+            
+            self.logger.info(f"  - Removed {total_removed} offsetting payments.")
     
     def _remove_zero_positions(self, tax_statement: TaxStatement):
         self.logger.info("Removing obsolete positions:")
