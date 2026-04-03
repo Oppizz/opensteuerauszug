@@ -119,6 +119,7 @@ def process(
     payment_reconciliation: bool = typer.Option(True, "--payment-reconciliation/--no-payment-reconciliation", help="Run optional payment reconciliation between Kursliste and broker evidence."),
     corrections_flex: Optional[List[Path]] = typer.Option(None, "--corrections-flex", help="IBKR Flex Query XML file(s) covering the post-year-end period (e.g. Jan–Mar of the following year). Only withholding-tax CashTransactions whose settleDate falls within the tax period are imported, allowing 1042-S corrections to be netted."),
     use_broker_withholding: UseBrokerWithholding = typer.Option(UseBrokerWithholding.CAP, "--use-broker-withholding", help="Control how broker withholding evidence is used: OFF disables adjustments, CAP (default) caps Kursliste (Q) withholding at the broker's effective level."),
+    cap_withholding_for_broker: bool = typer.Option(True, "--cap-withholding-for-broker/--no-cap-withholding-for-broker", help="When using --use-broker-withholding=CAP, also cap broker withholding to the broker's effective level (instead of using default DA-1 percentages from Kursliste)."),
     pre_amble: Optional[List[Path]] = typer.Option(None, "--pre-amble", help="List of PDF documents to add before the main steuerauszug."),
     post_amble: Optional[List[Path]] = typer.Option(None, "--post-amble", help="List of PDF documents to add after the main steuerauszug."),
 ):
@@ -504,6 +505,7 @@ def process(
             if use_broker_withholding == UseBrokerWithholding.CAP:
                 print("Running WithholdingCapCalculator...")
                 cap_calculator = WithholdingCapCalculator()
+                cap_calculator.skip_broker_payment = cap_withholding_for_broker == False
                 statement = cap_calculator.calculate(statement)
                 if cap_calculator.capped_securities:
                     for sec_name, dates in cap_calculator.capped_securities.items():

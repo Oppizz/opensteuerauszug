@@ -2634,7 +2634,8 @@ def render_tax_statement(
         story.append(create_dual_info_boxes(styles, usable_width))
 
     # Show a prominent hint on the summary page when critical warnings exist
-    story.extend(create_critical_warnings_hint(critical_warnings, styles))
+    if critical_warnings:
+        story.extend(create_critical_warnings_hint(critical_warnings, styles))
 
     # --- Bank Accounts Section ---
     bank_table = create_bank_accounts_table(tax_statement, styles, usable_width)
@@ -2642,7 +2643,7 @@ def render_tax_statement(
         story.append(PageBreak())
         story.append(Paragraph(t('bank_accounts'), title_style))
         story.append(bank_table)
-        story.append(Spacer(1, 0.5*cm))
+        #story.append(Spacer(1, 0.5*cm))
 
     # --- Securities/Depots Section for Type A ---
     securities_table_a = create_securities_table(tax_statement, styles, usable_width, "A")
@@ -2650,7 +2651,7 @@ def render_tax_statement(
         story.append(PageBreak())
         story.append(Paragraph(t('a_values_with_vst'), title_style))
         story.append(securities_table_a)
-        story.append(Spacer(1, 0.5*cm))
+        #story.append(Spacer(1, 0.5*cm))
     
     # --- Securities/Depots Section for Type B ---
     securities_table_b = create_securities_table(tax_statement, styles, usable_width, "B")
@@ -2658,7 +2659,7 @@ def render_tax_statement(
         story.append(PageBreak())
         story.append(Paragraph(t('b_values_without_vst'), title_style))
         story.append(securities_table_b)
-        story.append(Spacer(1, 0.5*cm))
+        #story.append(Spacer(1, 0.5*cm))
     
     # --- Securities/Depots Section for Type DA1 ---
     securities_table_da1 = create_securities_table(tax_statement, styles, usable_width, "DA1")
@@ -2666,7 +2667,7 @@ def render_tax_statement(
         story.append(PageBreak())
         story.append(Paragraph(t('values_with_da1_usa'), title_style))
         story.append(securities_table_da1)
-        story.append(Spacer(1, 0.5*cm))
+        #story.append(Spacer(1, 0.5*cm))
 
     # --- Liabilities Section ---
     liabilities_table = create_liabilities_table(tax_statement, styles, usable_width)
@@ -2674,7 +2675,7 @@ def render_tax_statement(
         story.append(PageBreak())
         story.append(Paragraph(t('liabilities_title'), title_style))
         story.append(liabilities_table)
-        story.append(Spacer(1, 0.5*cm))
+        #story.append(Spacer(1, 0.5*cm))
 
     if tax_statement.listOfSecurities:
         currency_summary_table = create_currency_summary_table(tax_statement, styles, usable_width)
@@ -2682,7 +2683,7 @@ def render_tax_statement(
             story.append(PageBreak())
             story.append(Paragraph(t('currency_summary'), title_style))
             story.append(currency_summary_table)
-            story.append(Spacer(1, 0.5*cm))
+            #story.append(Spacer(1, 0.5*cm))
 
     reconciliation_flowables = create_taxvalue_reconciliation_tables(tax_statement, styles, usable_width)
     if reconciliation_flowables:

@@ -1165,6 +1165,9 @@ class SecurityPayment(BaseXmlModel):
     # Withholding-cap metadata (set by WithholdingCapCalculator, never serialized).
     withholding_capped: bool = Field(default=False, exclude=True)
     withholding_capped_original_wht_chf: Optional[Decimal] = Field(default=None, exclude=True)
+
+    withholding_added: bool = Field(default=False, exclude=True)
+    withholding_added_original_wht_chf: Optional[Decimal] = Field(default=None, exclude=True)
     
     reportDate: Optional[date] = Field(default=None, exclude=True)
     remark: List[Remark] = Field(default=None, exclude=True)

@@ -43,6 +43,7 @@ class _KurslisteAgg:
     noncash: bool = False
     allows_broker_above_kursliste: bool = False
     has_capped_payment: bool = False
+    has_added_withholding: bool = False
     original_withholding_chf: Optional[Decimal] = None
     kursliste: Optional[bool] = None
     currency: Optional[str] = None
@@ -118,7 +119,7 @@ class PaymentReconciliationCalculator:
 
     def _reconcile_security(self, security: Security) -> List[PaymentReconciliationRow]:
         broker_payments = security.broker_payments or [p for p in security.payment if not p.kursliste]
-        kursliste_payments = [p for p in security.payment if p.kursliste or self.skip_broker_payment]
+        kursliste_payments = [p for p in security.payment if p.kursliste or self.skip_broker_payment == False]
         security_has_sensitive_overwithholding = (
             security.country in self._COUNTRIES_WHERE_OVERWITHHOLDING_SUGGESTS_CALCULATION_ISSUE
         )
@@ -198,6 +199,16 @@ class PaymentReconciliationCalculator:
                     f"{kurs.withholding_chf:.2f} CHF)."
                     if kurs.withholding_chf is not None
                     else "Withholding capped to broker level."
+                )
+            elif has_broker and kurs.has_added_withholding:
+                status = "capped"
+                matched = True
+                original_wht = kurs.original_withholding_chf
+                note = (
+                    f"Withholding adjusted to broker level ("
+                    f"{kurs.withholding_chf:.2f} CHF)."
+                    if kurs.withholding_chf is not None
+                    else "Withholding adjusted to broker level."
                 )
             elif has_kurs and not has_broker and kurs.noncash:
                 status = "expected"
@@ -399,7 +410,10 @@ class PaymentReconciliationCalculator:
         # Detect payments that were already capped by WithholdingCapCalculator.
         if payment.withholding_capped:
             agg.has_capped_payment = True
-            agg.original_withholding_chf = payment.withholding_capped_original_wht_chf
+            agg.original_withholding_chf = payment.withholding_capped_original_wht_chf + (agg.original_withholding_chf if agg.original_withholding_chf is not None else Decimal("0"))
+        elif payment.withholding_added and not agg.has_capped_payment:
+            agg.has_added_withholding = True
+            agg.original_withholding_chf = payment.withholding_added_original_wht_chf + (agg.original_withholding_chf if agg.original_withholding_chf is not None else Decimal("0"))
 
         agg.kursliste = payment.kursliste
 

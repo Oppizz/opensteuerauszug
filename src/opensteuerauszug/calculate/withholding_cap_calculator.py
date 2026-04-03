@@ -41,6 +41,7 @@ class WithholdingCapCalculator:
     def __init__(self, tolerance_chf: Decimal = Decimal("0.05")):
         self.tolerance_chf = tolerance_chf
         self.capped_securities: Dict[str, List[date]] = {}
+        self.skip_broker_payment = False
 
     def calculate(self, tax_statement: TaxStatement) -> TaxStatement:
         if not tax_statement.listOfSecurities or not tax_statement.listOfSecurities.depot:
@@ -49,6 +50,7 @@ class WithholdingCapCalculator:
         for depot in tax_statement.listOfSecurities.depot:
             for security in depot.security:
                 self._apply_withholding_cap(security)
+                self._apply_withholding_adj(security)
 
         return tax_statement
 
@@ -58,7 +60,7 @@ class WithholdingCapCalculator:
         broker_payments = security.broker_payments or [
             p for p in security.payment if not p.kursliste
         ]
-        kursliste_payments = [p for p in security.payment if p.kursliste]
+        kursliste_payments = [p for p in security.payment if p.kursliste or self.skip_broker_payment == False]
 
         if not broker_payments or not kursliste_payments:
             return
@@ -143,6 +145,86 @@ class WithholdingCapCalculator:
                     f"Kursliste {kurs_wht_chf:.2f} CHF."
                 )
 
+    def _apply_withholding_adj(self, security: Security) -> None:
+        broker_payments = security.broker_payments or [
+            p for p in security.payment if not p.kursliste
+        ]
+        kursliste_payments = [p for p in security.payment if p.kursliste or self.skip_broker_payment == False]
+
+        if not broker_payments:
+            return
+
+        # Only consider Broker payments that carry withholding.
+        wht_payments = [
+            p for p in broker_payments
+            if (p.withHoldingTaxClaim or Decimal("0")) + (p.nonRecoverableTaxAmountOriginal or Decimal("0")) != Decimal("0")
+        ]
+        if not wht_payments:
+            return
+
+        # Aggregate broker withholding by payment date.
+        broker_wht_by_date: Dict[date, _BrokerWhtAgg] = defaultdict(_BrokerWhtAgg)
+        for p in wht_payments:
+            agg = broker_wht_by_date[p.paymentDate]
+            self._accumulate_broker_wht(agg, p)
+
+        # Collect Kursliste exchange rates by date.
+        kurs_rate_by_date: Dict[date, Optional[Decimal]] = {}
+        for p in kursliste_payments:
+            if p.paymentDate not in kurs_rate_by_date and p.exchangeRate is not None:
+                kurs_rate_by_date[p.paymentDate] = p.exchangeRate
+
+        for (d, broker_agg) in broker_wht_by_date.items():
+            kl_payment = next((p for p in kursliste_payments if p.paymentDate == d), None)
+
+            # Cannot adjust if there's no corresponding Kursliste payment on this date to adjust.
+            if not kl_payment or kl_payment.withholding_capped:
+                continue
+
+            # When broker has payments on this date but no WHT entries
+            # broker effective WHT is 0.
+            if broker_agg.currency is None:
+                broker_wht_chf = Decimal("0")
+            # Convert broker WHT to CHF, avoiding double conversion when
+            # the amount is already in CHF (withHoldingTaxClaim path).
+            elif broker_agg.currency == "CHF":
+                broker_wht_chf = broker_agg.total
+            else:
+                rate = kurs_rate_by_date.get(d)
+                if rate is None:
+                    continue
+                broker_wht_chf = broker_agg.total * rate
+
+            # Clamp at zero to avoid negative withholding claims.
+            broker_wht_chf = max(Decimal("0"), broker_wht_chf)
+
+            # Kursliste WHT may use withHoldingTaxClaim or nonRecoverableTaxAmount.
+            kurs_wht_chf = (
+                (kl_payment.withHoldingTaxClaim or Decimal("0"))
+                + (kl_payment.nonRecoverableTaxAmount or Decimal("0"))
+            )
+
+            # No adjust needed when broker WHT is at or below kursliste.
+            if broker_wht_chf <= kurs_wht_chf - self.tolerance_chf or abs(broker_wht_chf - kurs_wht_chf) <= self.tolerance_chf:
+                continue
+
+            # Decide whether this is a full reversal (≈0) or partial.
+            if kurs_wht_chf <= self.tolerance_chf:
+                # Full reversal – move everything to grossRevenueB (no WHT).
+                self._apply_full_adj(security, kl_payment, broker_wht_chf, broker_agg.currency, d)
+            elif kl_payment.nonRecoverableTaxAmount is not None and kl_payment.nonRecoverableTaxAmount > Decimal("0") and (broker_agg.currency is None or broker_agg.currency != "CHF"):
+                # Partial adjustment is supported for nonRecoverableTaxAmount.
+                self._apply_partial_adj(security, kl_payment, kurs_wht_chf, broker_wht_chf, broker_agg.currency, d)
+            else:
+                # Fractional withHoldingTaxClaim is not supported.
+                #raise ValueError(
+                logger.warning(
+                    f"Fractional swiss withholding adjustment not supported for "
+                    f"{security.securityName} on {d}: Kursliste WHT "
+                    f"{kurs_wht_chf:.2f} CHF is neither ≈0 nor ≈equal to "
+                    f"Broker {broker_wht_chf:.2f} CHF."
+                )
+
     def _apply_full_reversal(
         self,
         security: Security,
@@ -174,11 +256,50 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Capped withholding for %s on %s: Kursliste %.2f CHF → 0.00 CHF "
+            "Capped withholding for %s on %s: Kursliste %.2f CHF -> 0.00 CHF "
             "(full reversal)",
             security.securityName,
             d,
             original_wht_chf,
+        )
+
+    def _apply_full_adj(
+        self,
+        security: Security,
+        kl_payment: SecurityPayment,
+        broker_wht_chf: Decimal,
+        broker_currency: Optional[str],
+        d: date,
+    ) -> None:
+        """Move all gross revenue to the A column."""
+        # With withholding any revenue is type A
+        if kl_payment.grossRevenueB and kl_payment.grossRevenueB > Decimal("0"):
+            assert kl_payment.grossRevenueA is None or kl_payment.grossRevenueA == Decimal("0")
+            kl_payment.grossRevenueA = kl_payment.grossRevenueB
+            kl_payment.grossRevenueB = Decimal("0.00")
+
+        # Store original values for reconciliation reporting.
+        kl_payment.withholding_added = True
+        kl_payment.withholding_added_original_wht_chf = Decimal("0")
+
+        # Set the WHT fields.
+        if broker_currency and broker_currency == "CHF":
+            kl_payment.withHoldingTaxClaim = broker_wht_chf
+        else:
+            kl_payment.nonRecoverableTaxAmount = broker_wht_chf
+
+        #  Broker knows better than Kursliste, so clear the (Q) sign if it was set.
+        if kl_payment.sign == "(Q)":
+            kl_payment.sign = None
+
+        self._track(security.securityName, d)
+
+        logger.info(
+            "Adjusted withholding for %s on %s: Kursliste 0.00 CHF -> %.2f CHF "
+            "(full adjustment)",
+            security.securityName,
+            d,
+            broker_wht_chf,
         )
 
     def _apply_partial_cap(
@@ -204,8 +325,40 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Capped withholding for %s on %s: Kursliste %.2f CHF → broker %.2f CHF "
+            "Capped withholding for %s on %s: Kursliste %.2f CHF -> broker %.2f CHF "
             "(partial cap on nonRecoverableTaxAmount)",
+            security.securityName,
+            d,
+            original_wht_chf,
+            broker_wht_chf,
+        )
+
+    def _apply_partial_adj(
+        self,
+        security: Security,
+        kl_payment: SecurityPayment,
+        original_wht_chf: Decimal,
+        broker_wht_chf: Decimal,
+        broker_currency: Optional[str],
+        d: date,
+    ) -> None:
+        """Adj nonRecoverableTaxAmount to the broker's effective level."""
+        assert kl_payment.grossRevenueA is None or kl_payment.grossRevenueA == Decimal("0")
+
+        # Store original values for reconciliation reporting.
+        kl_payment.withholding_added = True
+        kl_payment.withholding_added_original_wht_chf = original_wht_chf
+
+        kl_payment.nonRecoverableTaxAmount = broker_wht_chf
+        # Only clear (Q) sign specifically.
+        if kl_payment.sign == "(Q)":
+            kl_payment.sign = None
+
+        self._track(security.securityName, d)
+
+        logger.info(
+            "Adjusted withholding for %s on %s: Kursliste %.2f CHF -> broker %.2f CHF "
+            "(partial adjustment on nonRecoverableTaxAmount)",
             security.securityName,
             d,
             original_wht_chf,
