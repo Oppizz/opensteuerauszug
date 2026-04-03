@@ -551,6 +551,8 @@ class IbkrImporter:
                     name_symbol = f"{name} ({symbol})"
                 entry['best_name'] = name_symbol
                 entry['priority'] = priority
+            if entry and entry.get('ticker', None) is None and symbol:
+                entry['ticker'] = symbol
 
         for stmt in all_flex_statements:
             account_id = self._get_required_field(
@@ -1297,6 +1299,7 @@ class IbkrImporter:
             # Determine best security name
             name_metadata = security_name_metadata[sec_pos_obj]
             best_name = name_metadata['best_name']
+            ticker = name_metadata.get('ticker', None)
 
             if best_name:
                 final_security_name = best_name
@@ -1325,7 +1328,8 @@ class IbkrImporter:
                 valorNumber=sec_pos_obj.valor,
                 country=country,
                 stock=sorted_stocks,
-                payment=sorted_payments
+                payment=sorted_payments,
+                symbol=ticker
             )
 
             if is_rights_issue:

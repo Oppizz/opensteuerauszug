@@ -481,7 +481,7 @@ class CleanupCalculator:
                         # After enrichment attempt, warn about symbols that still
                         # lack an ISIN and valor number.  This typically means the
                         # symbol could not be mapped via the identifiers CSV.
-                        if security.symbol and (not security.isin and (not security.valorNumber or security.valorNumber == 0)):
+                        if security.symbol and (not security.isin and (not security.valorNumber or security.valorNumber == 0) and security.securityCategory != "OPTION" and security.securityCategory != "OTHER"):
                             warning_msg = (
                                 f"Symbol '{security.symbol}' could not be mapped "
                                 "to an ISIN or Valor number. Add it to the "

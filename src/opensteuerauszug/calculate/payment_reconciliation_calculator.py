@@ -244,15 +244,20 @@ class PaymentReconciliationCalculator:
                     note = "Broker div is below Kursliste value."
                 elif not w_ok:
                     if broker.wth_correction_late_date is not None:
-                        note = f"Broker wth is below Kursliste value; late correction detected on {broker.wth_correction_late_date}."
+                        note = f"Broker wth is below Kursliste val; late correction on {broker.wth_correction_late_date}."
                     else:
-                        note = "Broker wth is below Kursliste value."
+                        if kurs.withholding_chf is None or kurs.withholding_chf == Decimal("0"):
+                            note = "No wth in Kursliste."
+                        elif broker_with_chf and kurs.withholding_chf < broker_with_chf:
+                            note = "Kursliste wth is below Broker value."
+                        else:
+                            note = "Broker wth is below Kursliste value."
                 matched = div_ok and w_ok
                 status = "match" if matched else "mismatch"
             elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
                 skip = True
             elif not has_kurs and has_broker:
-                note = "Broker payment has no Kursliste entry."
+                note = "Broker paym has no Kursliste entry."
             elif has_kurs and not has_broker:
                 if kurs.dividend_chf in (None, Decimal("0")):
                     payment_undef = next((p for p in kursliste_payments if p.paymentDate == d and (p.undefined or p.payment_type_original == PaymentTypeOriginal.FUND_ACCUMULATION)), None)
@@ -290,12 +295,12 @@ class PaymentReconciliationCalculator:
                         broker_dividend_currency=broker.dividend_currency,
                         broker_withholding_amount=broker.withholding if broker.withholding_currency else None,
                         broker_withholding_currency=broker.withholding_currency,
-                        broker_withholding_entry_text=broker.withholding_entry_text,
+                        broker_withholding_entry_text=self._remove_symbol_prefix(broker.withholding_entry_text, security),
                         exchange_rate=kurs.exchange_rate,
                         accumulating=kurs.noncash,
                         matched=matched,
                         status=status,
-                        note=note,
+                        note=self._remove_symbol_prefix(note, security),
                         kursliste=has_kurs and kurs.kursliste != None and kurs.kursliste,
                         kursliste_security=security.kursliste != None and security.kursliste,
                         kursliste_undefined=kursliste_undefined
@@ -303,6 +308,11 @@ class PaymentReconciliationCalculator:
             )
 
         return rows
+    
+    def _remove_symbol_prefix(self, text: Optional[str], security: Security) -> str:
+        if text and security and security.isin and security.symbol:
+            text = text.removeprefix(f"{security.symbol}({security.isin})").removeprefix(f"{security.symbol} ({security.isin})").strip()
+        return text
 
     def _component_matches(
         self,

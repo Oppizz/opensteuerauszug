@@ -120,9 +120,9 @@ def format_currency_2dp(value: Decimal, default='0.00'):
     except: return default
 
 # For most values we use 2 decimals, or leave blank it None or zero
-def format_currency(value: Optional[Decimal], default=''):
+def format_currency(value: Optional[Decimal], default='', allow_zero: bool = False):
     """Format currency, trimming trailing zeros for better alignment."""
-    if value is None or value == Decimal(0):
+    if (value is None or value == Decimal(0)) and allow_zero == False:
         return default
 
     try:
@@ -2289,7 +2289,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                 broker_div = escape_html_for_paragraph(f"{format_currency(row.broker_dividend_amount)} {row.broker_dividend_currency or ''}".strip())
             broker_wht_paragraph = Paragraph('', val_right)
             if row.broker_withholding_amount is not None:
-                broker_wht = f"{format_currency(row.broker_withholding_amount)} {row.broker_withholding_currency or ''}".strip()
+                broker_wht = f"{format_currency(row.broker_withholding_amount, '', True)} {row.broker_withholding_currency or ''}".strip()
                 broker_wht_markup = escape_html_for_paragraph(broker_wht)
                 if row.broker_withholding_entry_text:
                     broker_wht_text = escape_html_for_paragraph(row.broker_withholding_entry_text).replace("\n", "<br/>")
@@ -2302,9 +2302,13 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
                 row_note = f"<font size=7>{escape_html_for_paragraph(row.note)}</font>"
                 if row.status == 'expected':
                     if row.kursliste_undefined:
-                        kursliste_div += f"{"<br/>" if kursliste_div.strip() else ''}{row_note}"
+                        if kursliste_div == '':
+                            kursliste_div = format_currency(Decimal('0'), '', True)
+                        kursliste_div += f"<br/>{row_note}"
                     else:
-                        broker_div += f"{"<br/>" if broker_div.strip() else ''}{row_note}"
+                        if broker_div == '':
+                            broker_div = escape_html_for_paragraph(f"{format_currency(Decimal('0'), '', True)} {row.broker_dividend_currency or ''}".strip())
+                        broker_div += f"<br/>{row_note}"
                 else:
                     status_mark += f"<br/>{row_note}"
             if row.status != 'match' and row.kursliste in (None, False) and row.kursliste_security:
@@ -2329,7 +2333,7 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
             elif row.status == 'capped':
                 capped_rows.append(idx)
 
-        col_widths = [usable_width * 0.21, usable_width * 0.08, usable_width * 0.05, usable_width * 0.07, usable_width * 0.1, usable_width * 0.11, usable_width * 0.12, usable_width * 0.16, usable_width * 0.08]
+        col_widths = [usable_width * 0.21, usable_width * 0.06, usable_width * 0.04, usable_width * 0.06, usable_width * 0.11, usable_width * 0.1, usable_width * 0.1, usable_width * 0.17, usable_width * 0.15]
         table = Table([table_header] + data, colWidths=col_widths, repeatRows=1)
         style = [
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
