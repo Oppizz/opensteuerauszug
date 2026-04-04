@@ -28,26 +28,26 @@ from reportlab.lib.pagesizes import A4, landscape
 import logging
 
 # --- Import TaxStatement model ---
-from ..model.ech0196 import Depot, SecurityCategory, SecurityPayment, TaxStatement, Security
-from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
+from opensteuerauszug.model.ech0196 import Depot, SecurityCategory, SecurityPayment, TaxStatement, Security
+from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
 from ..model.payment_reconciliation import PaymentReconciliationRow, TaxValueReconciliationRow
 
 from ..core.constants import NON_TAXABLE_SIGNS
 
 # --- Import OneDeeBarCode for barcode rendering ---
-from ..render.onedee import OneDeeBarCode
+from opensteuerauszug.render.onedee import OneDeeBarCode
 
 # --- Import Organisation helper functions ---
-from ..core.organisation import compute_org_nr
+from opensteuerauszug.core.organisation import compute_org_nr
 
 # --- Import Security type utilities ---
-from ..core.security import determine_security_type, SecurityType
+from opensteuerauszug.core.security import determine_security_type, SecurityType
 
 # --- Import styles utility ---
-from ..util.styles import get_custom_styles, FONT_REGULAR, FONT_BOLD
-from ..util import round_accounting
-from ..render.markdown_renderer import markdown_to_platypus
-from ..render.translations import t as _t, DEFAULT_LANGUAGE
+from opensteuerauszug.util.styles import get_custom_styles, FONT_REGULAR, FONT_BOLD
+from opensteuerauszug.util import round_accounting
+from opensteuerauszug.render.markdown_renderer import markdown_to_platypus
+from opensteuerauszug.render.translations import t as _t, DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 

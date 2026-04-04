@@ -8,16 +8,16 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
-from ...model.position import SecurityPosition
-from ...model.ech0196 import (
+from opensteuerauszug.model.position import SecurityPosition
+from opensteuerauszug.model.ech0196 import (
     BankAccountName, ClientNumber, Institution, OrganisationName, SecurityCategory, TaxStatement, ListOfSecurities, ListOfBankAccounts,
     Security, SecurityStock, SecurityPayment,
     BankAccount, BankAccountPayment, BankAccountTaxValue,
     CurrencyId, QuotationType, DepotNumber, BankAccountNumber, Depot, ISINType, Client, CantonAbbreviation
 )
-from ...core.position_reconciler import PositionReconciler
-from ...config.models import IbkrAccountSettings
-from ...core.constants import UNINITIALIZED_QUANTITY
+from opensteuerauszug.core.position_reconciler import PositionReconciler
+from opensteuerauszug.config.models import IbkrAccountSettings
+from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
 
 IBKR_ASSET_CATEGORY_TO_ECH_SECURITY_CATEGORY: Final[Dict[str, SecurityCategory]] = {
     "STK": "SHARE",

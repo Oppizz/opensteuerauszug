@@ -8,8 +8,8 @@ from typing import List, Optional
 from datetime import date, datetime
 from pypdf import PdfReader, PdfWriter
 
-from .config.models import SchwabAccountSettings, IbkrAccountSettings, GeneralSettings # Added GeneralSettings
-from .render.translations import DEFAULT_LANGUAGE
+from opensteuerauszug.config.models import SchwabAccountSettings, IbkrAccountSettings, GeneralSettings # Added GeneralSettings
+from opensteuerauszug.render.translations import DEFAULT_LANGUAGE
 from .core.identifier_loader import SecurityIdentifierMapLoader
 
 # Use the generated eCH-0196 model

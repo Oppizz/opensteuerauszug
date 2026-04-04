@@ -7,13 +7,13 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
-from ..model.ech0196 import (
+from opensteuerauszug.model.ech0196 import (
     PaymentTypeOriginal,
     Security,
     SecurityPayment,
     TaxStatement,
 )
-from ..model.payment_reconciliation import (
+from opensteuerauszug.model.payment_reconciliation import (
     PaymentReconciliationReport,
     PaymentReconciliationRow,
     TaxValueReconciliationRow,

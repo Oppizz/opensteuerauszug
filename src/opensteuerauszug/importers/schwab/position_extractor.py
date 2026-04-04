@@ -3,8 +3,8 @@ import re
 from typing import List, Dict, Optional, Tuple
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, date, timedelta
-from ...model.position import Position, CashPosition, SecurityPosition
-from ...model.ech0196 import SecurityStock, CurrencyId
+from opensteuerauszug.model.position import Position, CashPosition, SecurityPosition
+from opensteuerauszug.model.ech0196 import SecurityStock, CurrencyId
 
 class PositionExtractor:
     """

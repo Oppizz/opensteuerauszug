@@ -8,7 +8,7 @@ organization-related data in tax statements.
 import hashlib
 from typing import Optional
 
-from ..model.ech0196 import TaxStatement
+from opensteuerauszug.model.ech0196 import TaxStatement
 
 def hash_organization_name(org_name: str) -> str:
     """

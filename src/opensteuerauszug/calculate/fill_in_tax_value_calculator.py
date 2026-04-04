@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 import logging
 
-from ..model.ech0196 import SecurityPayment, Security
+from opensteuerauszug.model.ech0196 import SecurityPayment, Security
 from .kursliste_tax_value_calculator import KurslisteTaxValueCalculator
 from .base import CalculationMode
 from ..core.exchange_rate_provider import ExchangeRateProvider
