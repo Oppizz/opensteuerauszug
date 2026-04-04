@@ -109,10 +109,13 @@ class IbkrImporter:
     def _qty_apply_multiplier(self, data_object: Any, quantity: Decimal,
                               object_description: str) -> Decimal:
         """Helper to apply multiplier to quantity."""
-        value = getattr(data_object, "assetCategory", None)
-        #multiplier = getattr(data_object, "multiplier", None)
+        assetCat = getattr(data_object, "assetCategory", None)
+        subCat = getattr(data_object, "subCategory", None)
+        if subCat is not None:
+            subCat = subCat.upper()
+        country = self._normalize_country_code(getattr(data_object, "issuerCountryCode", None))
         quantity_converted = quantity
-        if value == "BOND" and quantity % 1000 == 0:
+        if assetCat == "BOND" and subCat and subCat == "CORP" and country and country == "US" and quantity % 1000 == 0:
             quantity_converted = quantity / 1000
 
         return quantity_converted
@@ -768,6 +771,10 @@ class IbkrImporter:
                     pos_value = None
                     if getattr(open_pos, 'positionValue', None) is not None:
                         pos_value = self._to_decimal(open_pos.positionValue, 'positionValue', f"OpenPosition {symbol}")
+
+                    if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country == "US":
+                        # For US corporate bonds, price is a percentage of nominal value, so we need to adjust the mark price accordingly
+                        mark_price = pos_value / quantity
 
                     balance_stock = SecurityStock(
                         # Balance as of the period end + 1
