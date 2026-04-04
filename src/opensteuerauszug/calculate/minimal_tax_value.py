@@ -1,5 +1,6 @@
 from .base import BaseCalculator, CalculationMode, CalculationError
 from ..model.ech0196 import (
+    SecurityStock,
     TaxStatement,
     BankAccount,  # Added BankAccount
     BankAccountTaxValue,
@@ -9,13 +10,14 @@ from ..model.ech0196 import (
     Security,  # Added Security
     SecurityTaxValue,
     SecurityPayment,  # Added SecurityPayment
+    PaymentTypeOriginal,
 )
 from ..core.exchange_rate_provider import ExchangeRateProvider
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from ..core.constants import WITHHOLDING_TAX_RATE
-from typing import Tuple, Optional, List
-from datetime import date
+from typing import Dict, Tuple, Optional, List
+from datetime import date, timedelta
 import logging
 
 
@@ -40,6 +42,11 @@ class MinimalTaxValueCalculator(BaseCalculator):
         super().__init__(mode)
         self.exchange_rate_provider = exchange_rate_provider
         self.keep_existing_payments = keep_existing_payments
+        self.remove_zero_positions = False
+        self.reconciliation_active = True
+        self.summarize_options = False
+        self.remove_offsetting_payments = False
+        self._removed_sec_identifiers: List[str] = []
         self._current_account_is_type_A = None
         self._current_security_is_type_A = None
         self._current_security_country = None
@@ -72,6 +79,12 @@ class MinimalTaxValueCalculator(BaseCalculator):
         # Perform conversion without quantization
         chf_amount = amount * exchange_rate
         return chf_amount, exchange_rate
+    
+    def _get_sec_identifier(self, security: Security) -> str:
+        ident = security.securityName
+        if security.isin:
+            ident = f"{ident} / {security.isin}"
+        return ident
 
     def calculate(self, tax_statement: TaxStatement) -> TaxStatement:
         """
@@ -80,13 +93,235 @@ class MinimalTaxValueCalculator(BaseCalculator):
         self._current_account_is_type_A = None  # Reset state at the beginning of a calculation run
         self._current_security_is_type_A = None  # Reset state
         self._current_security_country = None  # Reset state
+
+        if self.summarize_options:
+            self._summarize_positions(tax_statement)
+
+        if self.remove_offsetting_payments:
+            self._remove_offsetting_payments(tax_statement)
+
         super().calculate(tax_statement)
+
+        if self.remove_zero_positions:
+            self._remove_zero_positions(tax_statement)      
+
+        if self.summarize_options or self.summarize_options:
+            self._reorder_pos_idx(tax_statement)
+
         self.logger.info(
             "MinimalTaxValueCalculator: Finished processing. Errors: %s, Modified fields: %s",
             len(self.errors),
             len(self.modified_fields),
         )
         return tax_statement
+    
+    def _summarize_positions(self, tax_statement: TaxStatement):
+        self.logger.info("Summarizing OPTION positions:")
+        if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
+            period_end_plus_one = tax_statement.periodTo + timedelta(days=1)
+            for d in tax_statement.listOfSecurities.depot:
+                original_sec = d.security
+                d.security = []
+                currency_taxvalue_map: Dict[tuple[str, str], tuple[SecurityStock, SecurityTaxValue]] = {}
+                for sec in original_sec:
+                    if sec.securityCategory == "OPTION" and not sec.is_rights_issue and not sec.payment and (not sec.stock or any(s.corpAction for s in sec.stock) == False):
+                        stock: SecurityStock = None
+                        if sec.stock:
+                            stock = next((s for s in sec.stock if s.mutation == False and s.referenceDate == tax_statement.periodFrom), None)
+                        if (sec.taxValue and sec.taxValue.balance) or (stock and stock.balance):
+                            currency = sec.taxValue.balanceCurrency if sec.taxValue else stock.balanceCurrency
+                            opening_stock, tax_value = currency_taxvalue_map.get((sec.country, currency), (None, None))
+                            if not tax_value:
+                                tax_value = SecurityTaxValue(
+                                    referenceDate=tax_statement.periodTo,
+                                    quotationType=sec.taxValue.quotationType if sec.taxValue else stock.quotationType,
+                                    quantity=Decimal("1"),
+                                    balanceCurrency=currency,
+                                    balance=Decimal("0"),
+                                    unitPrice=Decimal("0")
+                                )
+                                tax_value.balanceCurrencyBroker = tax_value.balanceCurrency
+                                
+                                opening_stock = SecurityStock(
+                                    referenceDate=tax_statement.periodFrom,
+                                    mutation=False,
+                                    quotationType=tax_value.quotationType,
+                                    quantity=Decimal("1"),
+                                    balanceCurrency=tax_value.balanceCurrency,
+                                    balance=Decimal("0"),
+                                    unitPrice=Decimal("0"),
+                                    name="Opening balance"
+                                )
+                                
+                                currency_taxvalue_map[(sec.country, currency)] = (opening_stock, tax_value)
+
+                            if sec.taxValue and sec.taxValue.balance:
+                                tax_value.balance += sec.taxValue.balance
+                                tax_value.unitPrice = tax_value.balance
+
+                            if stock and stock.balance:
+                                opening_stock.balance += stock.balance
+                                opening_stock.unitPrice = opening_stock.balance
+                    else:
+                        d.security.append(sec)
+
+                pos_diff = len(original_sec)-len(d.security)
+
+                sec_pos_idx: int = 9900000
+                for (country, currency), (opening_stock, tax_value) in currency_taxvalue_map.items():
+                    if opening_stock.balance != Decimal("0") or tax_value.balance != Decimal("0"):
+                        sec = Security(
+                            positionId=sec_pos_idx,
+                            currency=opening_stock.balanceCurrency,
+                            quotationType=opening_stock.quotationType,
+                            securityCategory="OPTION",
+                            securityName=f"Interactive Brokers Optionen {currency}",
+                            isin=None,
+                            valorNumber=None,
+                            country=country,
+                            stock=[opening_stock],
+                            taxValue=tax_value,
+                            payment=[]
+                        )
+                        d.security.append(sec)
+                        self._removed_sec_identifiers.append(self._get_sec_identifier(sec))   # add the summarized position to the removed list to avoid kursliste warning, even though it's not technically removed
+                        sec_pos_idx += 1
+                self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(d.security))}")
+
+    def _remove_offsetting_payments(self, tax_statement: TaxStatement):
+        """Remove payments that cancel each other out on the same day."""
+        self.logger.info("Removing offsetting payments:")
+        if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
+            total_removed = 0
+            for d in tax_statement.listOfSecurities.depot:
+                for sec in d.security:
+                    if sec.payment:
+                        payments_by_date = defaultdict(list)
+                        for p in sec.payment:
+                            payments_by_date[(p.paymentDate,p.exDate,p.payment_type_original or "", p.sign or "", p.amountCurrency or "", p.quantity)].append(p)
+                        
+                        filtered_payments = []
+                        for payment_key, payments in payments_by_date.items():
+                            payment_date = payment_key[0]
+                            # Group payments by relevant fields to find offsetting pairs
+                            if len(payments) > 1:
+                                payments_check = payments.copy()
+                                for p in payments_check:
+                                    if p in payments:
+                                        # Look for an offsetting payment
+                                        offsetting = next((op for op in payments if op != p and 
+                                            op.payment_type_original == p.payment_type_original and
+                                            op.sign == p.sign and
+                                            op.amountCurrency == p.amountCurrency and
+                                            op.quantity == p.quantity and
+                                            op.amount == (-p.amount if p.amount is not None else None) and
+                                            op.withHoldingTaxClaim == (-p.withHoldingTaxClaim if p.withHoldingTaxClaim is not None else None)
+                                        ), None)
+                                        if offsetting:
+                                            payments.remove(p)
+                                            payments.remove(offsetting)
+                                if payments:
+                                    filtered_payments.extend(payments)
+                                
+                                cur_removed = len(payments_check) - len(payments)
+                                if cur_removed > 0:
+                                    total_removed += cur_removed
+                                    self.logger.debug(
+                                        f"  - Removing {cur_removed} offsetting {sec.securityName} "
+                                        f"payment(s) on {payment_date}"
+                                    )
+                            else:
+                                filtered_payments.extend(payments)
+                            
+                        sec.payment = filtered_payments
+            
+            self.logger.info(f"  - Removed {total_removed} offsetting payments.")
+    
+    def _remove_zero_positions(self, tax_statement: TaxStatement):
+        self.logger.info("Removing obsolete positions:")
+        # Remove bank accounts and securities with zero quantity and zero value to reduce noise in the output.
+        if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
+            removed_count = 0
+            for d in tax_statement.listOfSecurities.depot:
+                original_count = len(d.security)
+                original_sec = d.security
+                d.security = []
+                for sec in original_sec:
+                    ident = self._get_sec_identifier(sec)
+                    do_add = False
+                    keeping_info: str = None
+                    removal_warning: str = None
+                    if sec.stock and any(s.mutation == False for s in sec.stock) and any(s.mutation for s in sec.stock):
+                        do_add = True
+                        keeping_info = None
+                    elif sec.taxValue:
+                        if sec.taxValue.balance and sec.taxValue.balance != Decimal(0):
+                            do_add = True
+                            keeping_info = None
+                        elif sec.taxValue.quantity and sec.taxValue.quantity != Decimal(0):
+                            if self.reconciliation_active:
+                                do_add = True
+                                keeping_info = f"  - Keeping {ident} with taxable value = 0 for reconciliation"
+                            else:
+                                removal_warning = f"  - Removing {ident} with taxable value = 0 and no payments"
+
+                    if do_add == False:
+                        if sec.payment:
+                            if any(p.grossRevenueA or p.grossRevenueB or p.withHoldingTaxClaim or p.additionalWithHoldingTaxUSA or p.lumpSumTaxCredit or p.payment_type_original != PaymentTypeOriginal.FUND_ACCUMULATION for p in sec.payment):
+                                do_add = True
+                                keeping_info = None
+                            elif sec.broker_payments and any(p.amount for p in sec.broker_payments):
+                                do_add = True
+                                keeping_info = None
+                            else:
+                                if self.reconciliation_active:
+                                    do_add = True
+                                    keeping_info = f"  - Keeping {ident} with only non-taxable or unknown payment for reconciliation"
+                                else:
+                                    removal_warning = f"  - Removing {ident} with only non-taxable or unknown payment"
+                        elif self.reconciliation_active and sec.get_payment_and_broker_nontaxable():
+                            do_add = True
+                            keeping_info = f"  - Keeping {ident} with zero taxable payments for for reconciliation (capital gains check list)"
+
+                    if do_add:
+                        d.security.append(sec)
+                        if keeping_info:
+                            self.logger.info(keeping_info)
+                    else:
+                        self._removed_sec_identifiers.append(ident)
+                        if removal_warning:
+                            self.logger.warning(removal_warning)
+                        self.logger.debug(f"  - Removing security with zero payments, quantity and value: {ident}")
+                removed_count += original_count - len(d.security)
+            self.logger.info(f"  - Removed {removed_count} zero-payment/quantity/value securities from the tax statement.")
+
+        if tax_statement.listOfBankAccounts and len(tax_statement.listOfBankAccounts.bankAccount)>0:
+            original_count = len(tax_statement.listOfBankAccounts.bankAccount)
+            tax_statement.listOfBankAccounts.bankAccount = [
+                ba for ba in tax_statement.listOfBankAccounts.bankAccount
+                if (ba.taxValue and ba.taxValue.value is not None and ba.taxValue.value >= Decimal(0.5)) or 
+                    (ba.payment and len(ba.payment) > 0 and sum(p.grossRevenueA for p in ba.payment if p.grossRevenueA is not None)+sum(p.grossRevenueB for p in ba.payment if p.grossRevenueB is not None) > Decimal(0.5))
+            ]
+            removed_count = original_count - len(tax_statement.listOfBankAccounts.bankAccount)
+            self.logger.info(f"  - Removed {removed_count} zero-balance bank accounts from the tax statement.")
+
+        if tax_statement.listOfLiabilities and len(tax_statement.listOfLiabilities.liabilityAccount)>0:
+            original_count = len(tax_statement.listOfLiabilities.liabilityAccount)
+            tax_statement.listOfLiabilities.liabilityAccount = [
+                ba for ba in tax_statement.listOfLiabilities.liabilityAccount
+                if (ba.taxValue and ba.taxValue.value is not None and ba.taxValue.value >= Decimal(0.5)) or 
+                    (ba.payment and len(ba.payment) > 0 and sum(p.grossRevenueB for p in ba.payment if p.grossRevenueB is not None) > Decimal(0.5))
+            ]
+            removed_count = original_count - len(tax_statement.listOfLiabilities.liabilityAccount)
+            self.logger.info(f"  - Removed {removed_count} zero-balance liability accounts from the tax statement.")
+
+    def _reorder_pos_idx(self, tax_statement: TaxStatement):
+        sec_pos_idx = 0
+        if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
+            for d in tax_statement.listOfSecurities.depot:
+                for sec in sorted(d.security, key=lambda s: s.positionId or 1):
+                    sec_pos_idx += 1
+                    sec.positionId = sec_pos_idx
 
     def _handle_BankAccount(self, bank_account: BankAccount, path_prefix: str) -> None:
         """Sets the type A/B context based on the bank account's institution country code."""
@@ -207,6 +442,13 @@ class MinimalTaxValueCalculator(BaseCalculator):
 
         if security.payment and not security.broker_payments:
             security.broker_payments = [payment.model_copy(deep=True) for payment in security.payment]
+
+        if security.broker_payments:
+            for pay in security.broker_payments:
+                if (hasattr(pay, "exchangeRate") == False or pay.exchangeRate is None) and pay.amountCurrency and pay.paymentDate:
+                    pay.exchangeRate = self.exchange_rate_provider.get_exchange_rate(pay.amountCurrency, pay.paymentDate, path_prefix + ".exchangeRate")
+                if pay.exchangeRate and pay.amount:
+                    pay.amount_CHF = pay.amount*pay.exchangeRate
 
         # BaseCalculator does not have a _handle_Security method.
 

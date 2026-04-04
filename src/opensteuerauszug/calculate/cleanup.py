@@ -3,17 +3,17 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional, Dict, Any, cast, get_args
 from decimal import Decimal
 import logging
-from opensteuerauszug.model.ech0196 import (
+from ..model.ech0196 import (
     SecurityTaxValue, TaxStatement, SecurityStock, BankAccountPayment, SecurityPayment,
     Client, ClientNumber, CantonAbbreviation, LiabilityAccount, LiabilityAccountTaxValue,
     ListOfLiabilities, BankAccountName, CountryIdISO2Type, CurrencyId, LiabilityAccountPayment
 )
-from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
-from opensteuerauszug.util.sorting import find_index_of_date, sort_security_stocks, sort_payments, sort_security_payments
-from opensteuerauszug.config.models import GeneralSettings
-from opensteuerauszug.core.position_reconciler import PositionReconciler
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
-from opensteuerauszug.core.organisation import compute_org_nr
+from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
+from ..util.sorting import find_index_of_date, sort_security_stocks, sort_payments, sort_security_payments
+from ..config.models import GeneralSettings
+from ..core.position_reconciler import PositionReconciler
+from ..core.constants import UNINITIALIZED_QUANTITY
+from ..core.organisation import compute_org_nr
 
 logger = logging.getLogger(__name__)
 
@@ -481,7 +481,7 @@ class CleanupCalculator:
                         # After enrichment attempt, warn about symbols that still
                         # lack an ISIN and valor number.  This typically means the
                         # symbol could not be mapped via the identifiers CSV.
-                        if security.symbol and (not security.isin and (not security.valorNumber or security.valorNumber == 0)):
+                        if security.symbol and (not security.isin and (not security.valorNumber or security.valorNumber == 0) and security.securityCategory != "OPTION" and security.securityCategory != "OTHER"):
                             warning_msg = (
                                 f"Symbol '{security.symbol}' could not be mapped "
                                 "to an ISIN or Valor number. Add it to the "
@@ -523,6 +523,7 @@ class CleanupCalculator:
                                                 quotationType=candidate.quotationType,
                                                 quantity=candidate.quantity,
                                                 balanceCurrency=candidate.balanceCurrency,
+                                            balanceCurrencyBroker=candidate.balanceCurrency,
                                                 balance=candidate.balance,
                                                 unitPrice=candidate.unitPrice)
                                         else:

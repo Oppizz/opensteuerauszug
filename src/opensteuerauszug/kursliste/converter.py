@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 from typing import Optional, Union
 from pathlib import Path
 
-from opensteuerauszug.model.kursliste import (
+from ..model.kursliste import (
     Share, Bond, Fund, Derivative, CoinBullion, CurrencyNote, LiborSwap,
     Sign, Da1Rate, KurslisteMetadata
 )
@@ -30,11 +30,8 @@ def create_schema(conn):
         )
     """)
     # Add composite indexes for securities table matching query patterns
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_securities_isin_tax_year ON securities (isin, tax_year);")
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_securities_valor_tax_year"
-        " ON securities (valor_number, tax_year);"
-    )
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_securities_isin_tax_year ON securities (isin, tax_year);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_securities_valor_tax_year ON securities (valor_number, tax_year);")
 
     # Signs Table
     cursor.execute("""
@@ -46,7 +43,7 @@ def create_schema(conn):
             sign_object_blob BLOB
         )
     """)
-    cursor.execute("CREATE INDEX IF NOT EXISTS idx_signs_value_tax_year ON signs (sign_value, tax_year);")
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_signs_value_tax_year ON signs (sign_value, tax_year);")
 
     # DA1 Rates Table
     cursor.execute("""
@@ -59,10 +56,7 @@ def create_schema(conn):
             da1_rate_object_blob BLOB
         )
     """)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_da1_country_group_tax_year"
-        " ON da1_rates (country, security_group, tax_year);"
-    )
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_country_group_tax_year ON da1_rates (country, security_group, tax_year);")
 
     # Exchange Rates Daily Table - Changed rate from REAL to TEXT for Decimal precision
     cursor.execute("""
@@ -76,10 +70,7 @@ def create_schema(conn):
             source_file TEXT
         )
     """)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_exchange_daily_currency_date_year"
-        " ON exchange_rates_daily (currency_code, date, tax_year);"
-    )
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_daily_currency_date_year ON exchange_rates_daily (currency_code, date, tax_year);")
 
     # Exchange Rates Monthly Table - Changed rate from REAL to TEXT for Decimal precision
     cursor.execute("""
@@ -94,10 +85,7 @@ def create_schema(conn):
             source_file TEXT
         )
     """)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_exchange_monthly_currency_year_month"
-        " ON exchange_rates_monthly (currency_code, year, month, tax_year);"
-    )
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_monthly_currency_year_month ON exchange_rates_monthly (currency_code, year, month, tax_year);")
 
     # Exchange Rates Year End Table - Changed rate fields from REAL to TEXT for Decimal precision
     cursor.execute("""
@@ -112,10 +100,7 @@ def create_schema(conn):
             source_file TEXT
         )
     """)
-    cursor.execute(
-        "CREATE INDEX IF NOT EXISTS idx_exchange_year_end_currency_year"
-        " ON exchange_rates_year_end (currency_code, year, tax_year);"
-    )
+    #cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_year_end_currency_year ON exchange_rates_year_end (currency_code, year, tax_year);")
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metadata (
             key TEXT PRIMARY KEY,
@@ -127,6 +112,24 @@ def create_schema(conn):
         ("converter_schema_version", CONVERTER_SCHEMA_VERSION),
     )
     conn.commit()
+
+def create_idx(conn):
+    """Creates the database indexes."""
+    cursor = conn.cursor()
+
+    # Add composite indexes for securities table matching query patterns
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_securities_isin_tax_year ON securities (isin, tax_year);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_securities_valor_tax_year ON securities (valor_number, tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_signs_value_tax_year ON signs (sign_value, tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_da1_country_group_tax_year ON da1_rates (country, security_group, tax_year);")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_daily_currency_date_year ON exchange_rates_daily (currency_code, date, tax_year);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_monthly_currency_year_month ON exchange_rates_monthly (currency_code, year, month, tax_year);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exchange_year_end_currency_year ON exchange_rates_year_end (currency_code, year, tax_year);")
+
+    conn.commit()    
 
 def get_attr(elem, attr):
     """Helper to get attribute from an XML element."""
@@ -483,6 +486,9 @@ def convert_kursliste_xml_to_sqlite(
         # Final commit
         flush_batches()
         conn.commit()
+
+        print(f"\nCreating indexes...")
+        create_idx(conn)
 
         # Print summary
         print(f"\nConversion complete:")

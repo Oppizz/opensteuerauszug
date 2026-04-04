@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import List, Optional, Tuple
 from decimal import Decimal
-from opensteuerauszug.model.ech0196 import SecurityStock, CurrencyId, QuotationType
-from opensteuerauszug.util.sorting import sort_security_stocks
+from ..model.ech0196 import SecurityStock, CurrencyId, QuotationType, Security
+from ..util.sorting import sort_security_stocks
 
 # A logger for this module
 logger = logging.getLogger(__name__)
@@ -15,6 +15,7 @@ class ReconciledQuantity:
     """Represents a reconciled quantity at a specific date."""
     reference_date: date
     quantity: Decimal
+    balance: Optional[Decimal] = None
     currency: Optional[CurrencyId] = None # For context, especially for zero balances
 
 class PositionReconciler:
@@ -147,7 +148,7 @@ class PositionReconciler:
 
         return is_consistent, log_messages
 
-    def synthesize_position_at_date(self, target_date: date, print_log: bool = False, assume_zero_if_no_balances: bool = False) -> Optional[ReconciledQuantity]:
+    def synthesize_position_at_date(self, target_date: date, print_log: bool = False, assume_zero_if_no_balances: bool = False, security: Security = None) -> Optional[ReconciledQuantity]:
         """
         Calculates the position (quantity) at the START of the target_date.
         This means mutations on target_date itself are not included.
@@ -199,6 +200,7 @@ class PositionReconciler:
             # --- Forward Synthesis Path --- 
             current_quantity = last_balance_event.quantity
             current_currency = last_balance_event.balanceCurrency 
+            current_balance = last_balance_event.balance
             effective_balance_date = last_balance_event.referenceDate
             
             _synth_log(f"{log_prefix} Synthesizing FORWARD for START of {target_date}: Starting from balance on {effective_balance_date}, Qty: {current_quantity} ({current_currency}).")
@@ -208,7 +210,13 @@ class PositionReconciler:
             for i in range(last_balance_idx + 1, len(self.sorted_stocks)):
                 mutation_event = self.sorted_stocks[i]
                 
-                if mutation_event.referenceDate >= target_date:
+                ref_date = mutation_event.referenceDate
+                if mutation_event.mutation and security and security.securityCategory == "BOND" and mutation_event.settleDate and mutation_event.settleDate > ref_date:
+                    # For bonds, use settleDate to determine if the mutation affects the position at target_date
+                    if ref_date < target_date and mutation_event.settleDate >= target_date:
+                        logger.warning(f"Mutation event for bond '{security.get_ident_desc() if security else self.identifier}' on {ref_date} with settle date {mutation_event.settleDate} affects position at key date {target_date}. Using settle date for comparison.")
+                    ref_date = mutation_event.settleDate
+                if ref_date >= target_date:
                     break 
                 
                 if mutation_event.mutation:
@@ -217,7 +225,7 @@ class PositionReconciler:
                     _synth_log(f"{log_prefix} Synthesizing FORWARD for {target_date}: Applied mutation on {mutation_event.referenceDate}, Name='{mutation_event.name or 'N/A'}', Qty Change={delta_quantity}. New Qty: {current_quantity}.")
 
             _synth_log(f"{log_prefix} Synthesized FORWARD position for START of {target_date}: Final Qty: {current_quantity} ({current_currency}).")
-            return ReconciledQuantity(reference_date=target_date, quantity=current_quantity, currency=current_currency)
+            return ReconciledQuantity(reference_date=target_date, quantity=current_quantity, balance=current_balance, currency=current_currency)
         else:
             # --- Attempt Backward Synthesis Path --- 
             _synth_log(f"{log_prefix} No balance found at or before {target_date}. Attempting BACKWARD synthesis.")
@@ -244,7 +252,11 @@ class PositionReconciler:
                     
                     # Apply mutations that occurred strictly BEFORE the target_date.
                     for mutation_event in self.sorted_stocks:
-                        if mutation_event.referenceDate >= target_date:
+                        ref_date = mutation_event.referenceDate
+                        if mutation_event.mutation and security and security.securityCategory == "BOND" and mutation_event.settleDate:
+                            # For bonds, use settleDate to determine if the mutation affects the position at target_date
+                            ref_date = mutation_event.settleDate
+                        if ref_date >= target_date:
                             break
                         if mutation_event.mutation:
                             delta_quantity = mutation_event.quantity

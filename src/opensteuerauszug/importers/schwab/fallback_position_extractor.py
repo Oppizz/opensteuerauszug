@@ -3,8 +3,8 @@ from typing import List, Optional, Tuple
 from datetime import date, datetime # Added datetime
 import csv # Added for CSV parsing
 from decimal import Decimal, InvalidOperation # Added for Decimal
-from opensteuerauszug.model.position import Position
-from opensteuerauszug.model.ech0196 import SecurityStock, QuotationType, CurrencyId
+from ...model.position import Position
+from ...model.ech0196 import SecurityStock, QuotationType, CurrencyId
 
 logger = logging.getLogger(__name__)
 

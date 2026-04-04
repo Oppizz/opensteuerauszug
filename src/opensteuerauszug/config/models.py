@@ -1,7 +1,7 @@
 from typing import Dict, Any, Union, Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
-from opensteuerauszug.render.translations import DEFAULT_LANGUAGE
+from ..render.translations import DEFAULT_LANGUAGE
 
 class GeneralSettings(BaseModel):
     '''General settings applicable globally.'''
@@ -71,6 +71,9 @@ class IbkrAccountSettings(AccountSettingsBase):
 class CalculateSettings(BaseModel):
     """Settings for the calculation process."""
     keep_existing_payments: bool = Field(default=False, description="If True, keep existing payments when calculating tax values.")
+    summarize_options: bool = Field(default=False, description="If True, summarize options into one position.")
+    remove_zero_positions: bool = Field(default=False, description="If True, remove positions without starting and ending balance and no taxable paymants.")
+    remove_offsetting_payments: bool = Field(default=False, description="If True, remove offsetting payments that cancel each other out (e.g., a dividends of the same security on the same date with the same quantity and opposite amounts).")
 
 # A type union for all possible specific account settings models
 SpecificAccountSettingsUnion = Union[SchwabAccountSettings, IbkrAccountSettings] # Add other types like UBSAccountSettings here

@@ -3,20 +3,22 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
+from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
-from opensteuerauszug.model.ech0196 import (
+from ..model.ech0196 import (
     PaymentTypeOriginal,
     Security,
     SecurityPayment,
     TaxStatement,
 )
-from opensteuerauszug.model.payment_reconciliation import (
+from ..model.payment_reconciliation import (
     PaymentReconciliationReport,
     PaymentReconciliationRow,
+    TaxValueReconciliationRow,
 )
+from ..render.translations import DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +26,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class _BrokerAgg:
     dividend: Decimal = Decimal("0")
+    dividend_capital_gain: Decimal = Decimal("0")
     dividend_currency: Optional[str] = None
     withholding: Decimal = Decimal("0")
     withholding_currency: Optional[str] = None
     withholding_entry_text: Optional[str] = None
     allows_broker_above_kursliste: bool = False
-
+    exchange_rate: Optional[Decimal] = None
+    wth_correction_late_date: Optional[date] = None
 
 @dataclass
 class _KurslisteAgg:
@@ -39,7 +43,10 @@ class _KurslisteAgg:
     noncash: bool = False
     allows_broker_above_kursliste: bool = False
     has_capped_payment: bool = False
+    has_added_withholding: bool = False
     original_withholding_chf: Optional[Decimal] = None
+    kursliste: Optional[bool] = None
+    currency: Optional[str] = None
 
 
 class PaymentReconciliationCalculator:
@@ -75,6 +82,10 @@ class PaymentReconciliationCalculator:
     def __init__(self, tolerance_chf: Decimal = Decimal("0.05"), tolerance_frac: Decimal = Decimal("0.0005")):
         self.tolerance_chf = tolerance_chf
         self.tolerance_frac = tolerance_frac
+        self.skip_broker_payment = False
+        self.language=DEFAULT_LANGUAGE
+        self.periodFrom: Optional[date] = None
+        self.periodTo: Optional[date] = None
 
     def calculate(self, tax_statement: TaxStatement) -> TaxStatement:
         report = PaymentReconciliationReport()
@@ -82,11 +93,16 @@ class PaymentReconciliationCalculator:
         if not tax_statement.listOfSecurities or not tax_statement.listOfSecurities.depot:
             tax_statement.payment_reconciliation_report = report
             return tax_statement
+        
+        self.periodFrom = tax_statement.periodFrom
+        self.periodTo = tax_statement.periodTo
 
         for depot in tax_statement.listOfSecurities.depot:
             for security in depot.security:
                 rows = self._reconcile_security(security)
                 report.rows.extend(rows)
+                tax_value_rows = self._reconcile_tax_value(security)
+                report.tax_value_rows.extend(tax_value_rows)
 
         for row in report.rows:
             if row.status == "match":
@@ -103,7 +119,7 @@ class PaymentReconciliationCalculator:
 
     def _reconcile_security(self, security: Security) -> List[PaymentReconciliationRow]:
         broker_payments = security.broker_payments or [p for p in security.payment if not p.kursliste]
-        kursliste_payments = [p for p in security.payment if p.kursliste]
+        kursliste_payments = [p for p in security.payment if p.kursliste or self.skip_broker_payment == False]
         security_has_sensitive_overwithholding = (
             security.country in self._COUNTRIES_WHERE_OVERWITHHOLDING_SUGGESTS_CALCULATION_ISSUE
         )
@@ -111,8 +127,23 @@ class PaymentReconciliationCalculator:
         broker_by_date: Dict[date, _BrokerAgg] = defaultdict(_BrokerAgg)
         kurs_by_date: Dict[date, _KurslisteAgg] = defaultdict(_KurslisteAgg)
 
+        kursliste_payments_amount = [p for p in kursliste_payments if p.kursliste and (p.grossRevenueA or Decimal("0")) + (p.grossRevenueB or Decimal("0")) != Decimal("0")]
+        has_kursliste = any(kursliste_payments_amount)
+
         for payment in broker_payments:
             key_date = payment.paymentDate
+            if has_kursliste and (payment.amount or payment.withHoldingTaxClaim or payment.nonRecoverableTaxAmountOriginal) and payment.reportDate and payment.reportDate.year == payment.paymentDate.year and ((payment.paymentDate < payment.reportDate and security.securityCategory == "BOND") or security.securityCategory == "SHARE"):
+                if any(p for p in kursliste_payments_amount if p.paymentDate == payment.paymentDate) == False:
+                    if any(p for p in kursliste_payments_amount if p.paymentDate == payment.reportDate):
+                        key_date = payment.reportDate
+                    else:
+                        check_date = payment.reportDate + timedelta(days=1)
+                        if check_date.year == payment.paymentDate.year and any(p for p in kursliste_payments_amount if p.paymentDate == check_date):
+                            key_date = check_date
+                        else:
+                            check_date = payment.reportDate - timedelta(days=1)
+                            if check_date.year == payment.paymentDate.year and any(p for p in kursliste_payments_amount if p.paymentDate == check_date):
+                                key_date = check_date
             agg = broker_by_date[key_date]
             self._accumulate_broker(agg, payment)
 
@@ -133,20 +164,30 @@ class PaymentReconciliationCalculator:
             has_broker = d in broker_by_date
             has_kurs = d in kurs_by_date
 
+            broker_dividend_amount_curr=broker.dividend if broker.dividend_currency else None
+
             broker_div_chf = None
+            broker_div_capital_gain_chf = None
             broker_with_chf = None
             if kurs.exchange_rate is not None:
-                if broker.dividend_currency is not None:
+                if broker.dividend_currency is not None and kurs.currency is not None and broker.dividend_currency == kurs.currency:
                     broker_div_chf = broker.dividend * kurs.exchange_rate
-                if broker.withholding_currency is not None:
-                    if broker.withholding_currency == "CHF":
-                        broker_with_chf = broker.withholding
-                    else:
-                        broker_with_chf = broker.withholding * kurs.exchange_rate
+                if broker.dividend_currency is not None and kurs.currency is not None and broker.dividend_currency == kurs.currency:
+                    broker_div_capital_gain_chf = broker.dividend_capital_gain * kurs.exchange_rate
+                if broker.withholding_currency is not None and kurs.currency is not None and broker.withholding_currency == kurs.currency:
+                    broker_with_chf = broker.withholding * kurs.exchange_rate
+            if broker_div_chf is None and broker.dividend_currency is not None and broker.exchange_rate is not None:
+                broker_div_chf = broker.dividend * broker.exchange_rate
+            if broker_div_capital_gain_chf is None and broker.dividend_currency is not None and broker.exchange_rate is not None:
+                broker_div_capital_gain_chf = broker.dividend_capital_gain * broker.exchange_rate
+            if broker_with_chf is None and broker.withholding_currency is not None and broker.exchange_rate is not None:
+                broker_with_chf = broker.withholding * broker.exchange_rate
 
             matched = False
             status = "mismatch"
             note = None
+            skip = False
+            kursliste_undefined = None
 
             # Detect capped payments (WithholdingCapCalculator already ran).
             if has_kurs and kurs.has_capped_payment:
@@ -159,10 +200,37 @@ class PaymentReconciliationCalculator:
                     if kurs.withholding_chf is not None
                     else "Withholding capped to broker level."
                 )
+            elif has_broker and kurs.has_added_withholding:
+                status = "capped"
+                matched = True
+                original_wht = kurs.original_withholding_chf
+                note = (
+                    f"Withholding adjusted to broker level ("
+                    f"{kurs.withholding_chf:.2f} CHF)."
+                    if kurs.withholding_chf is not None
+                    else "Withholding adjusted to broker level."
+                )
             elif has_kurs and not has_broker and kurs.noncash:
                 status = "expected"
-                note = "Accumulating fund payment expected to be absent in broker cash flow."
-                matched = True
+                if kurs.dividend_chf or kurs.withholding_chf:
+                    note = "Accumulating fund payment expected to be absent in broker cash flow."
+                if security.stock:
+                    corp_actions = [s for s in security.stock if s.mutation and s.corpAction]
+                    if any(corp_actions):
+                        for payment in kursliste_payments:
+                            if payment.paymentDate == d and payment.payment_type_original is not None and payment.payment_type_original != PaymentTypeOriginal.STANDARD:
+                                ref_date = payment.exDate if payment.exDate else payment.paymentDate
+                                corp_actions_date = [s for s in corp_actions if s.referenceDate == ref_date and s.balanceCurrency == payment.amountCurrency]
+                                if len(corp_actions_date) == 0:
+                                    corp_actions_date = [s for s in corp_actions if s.referenceDate == ref_date]
+                                if any(corp_actions_date):
+                                    corp_action = corp_actions_date[0]
+                                    if corp_action.name:
+                                        note = corp_action.name
+                                        break
+                if note is None:
+                    if any((p for p in kursliste_payments if p.paymentDate == d and (p.payment_type_original not in(PaymentTypeOriginal.OTHER_BENEFIT, PaymentTypeOriginal.FUND_ACCUMULATION) or p.undefined))) == False:
+                        status = "match"
             elif has_kurs and has_broker:
                 allow_broker_above_kursliste = (
                     kurs.allows_broker_above_kursliste or broker.allows_broker_above_kursliste
@@ -170,6 +238,7 @@ class PaymentReconciliationCalculator:
                 div_ok = self._component_matches(
                     kurs_value_chf=kurs.dividend_chf,
                     broker_value_chf=broker_div_chf,
+                    broker_capital_gain_chf=broker_div_capital_gain_chf,
                     allow_bidirectional_on_noncash=kurs.noncash,
                     allow_broker_above_kursliste=allow_broker_above_kursliste,
                 )
@@ -182,15 +251,36 @@ class PaymentReconciliationCalculator:
                     ),
                 )
                 if not div_ok:
-                    note = "Broker dividend is below Kursliste value beyond tolerance."
+                    broker_dividend_amount_curr = (broker_dividend_amount_curr or Decimal("0")) - broker.dividend_capital_gain
+                    note = "Broker div is below Kursliste value."
                 elif not w_ok:
-                    note = "Broker withholding is below Kursliste value beyond tolerance."
+                    if broker.wth_correction_late_date is not None:
+                        note = f"Broker wth is below Kursliste val; late correction on {broker.wth_correction_late_date}."
+                    else:
+                        if kurs.withholding_chf is None or kurs.withholding_chf == Decimal("0"):
+                            note = "No wth in Kursliste."
+                        elif broker_with_chf and kurs.withholding_chf < broker_with_chf:
+                            note = "Kursliste wth is below Broker value."
+                        else:
+                            note = "Broker wth is below Kursliste value."
                 matched = div_ok and w_ok
                 status = "match" if matched else "mismatch"
+            elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
+                skip = True
             elif not has_kurs and has_broker:
-                note = "Broker payment has no Kursliste entry."
+                note = "Broker paym has no Kursliste entry."
             elif has_kurs and not has_broker:
-                if (
+                if kurs.dividend_chf in (None, Decimal("0")):
+                    payment_undef = next((p for p in kursliste_payments if p.paymentDate == d and (p.undefined or p.payment_type_original == PaymentTypeOriginal.FUND_ACCUMULATION)), None)
+                    if payment_undef:
+                        status = "expected"
+                        note = f"{payment_undef.name} {payment_undef.sign if payment_undef.sign else ""}"
+                        kursliste_undefined = True
+                        if payment_undef.remark and len(payment_undef.remark)>0:
+                            remark = next((r for r in payment_undef.remark if r.text and r.lang and r.lang.lower() == self.language.lower()), None) or remark[0]
+                            if remark and remark.text:
+                                note += f": {remark.text}"
+                elif (
                     abs(kurs.dividend_chf) < Decimal("0.01")
                     and abs(kurs.withholding_chf) < Decimal("0.01")
                 ):
@@ -203,27 +293,37 @@ class PaymentReconciliationCalculator:
                 status = "match"
                 matched = True
 
-            rows.append(
-                PaymentReconciliationRow(
-                    country=country,
-                    security=security_label,
-                    payment_date=d,
-                    kursliste_dividend_chf=kurs.dividend_chf,
-                    kursliste_withholding_chf=kurs.original_withholding_chf or kurs.withholding_chf,
-                    broker_dividend_amount=broker.dividend if broker.dividend_currency else None,
-                    broker_dividend_currency=broker.dividend_currency,
-                    broker_withholding_amount=broker.withholding if broker.withholding_currency else None,
-                    broker_withholding_currency=broker.withholding_currency,
-                    broker_withholding_entry_text=broker.withholding_entry_text,
-                    exchange_rate=kurs.exchange_rate,
-                    accumulating=kurs.noncash,
-                    matched=matched,
-                    status=status,
-                    note=note,
-                )
+            if (skip == False):
+                rows.append(
+                    PaymentReconciliationRow(
+                        country=country,
+                        security=security_label,
+                        payment_date=d,
+                        kursliste_dividend_chf=kurs.dividend_chf,
+                        kursliste_withholding_chf=kurs.original_withholding_chf or kurs.withholding_chf,
+                        kursliste_amount_currency=kurs.currency if kurs and kurs.currency else broker.dividend_currency,
+                        broker_dividend_amount=broker_dividend_amount_curr,
+                        broker_dividend_currency=broker.dividend_currency,
+                        broker_withholding_amount=broker.withholding if broker.withholding_currency else None,
+                        broker_withholding_currency=broker.withholding_currency,
+                        broker_withholding_entry_text=self._remove_symbol_prefix(broker.withholding_entry_text, security),
+                        exchange_rate=kurs.exchange_rate,
+                        accumulating=kurs.noncash,
+                        matched=matched,
+                        status=status,
+                        note=self._remove_symbol_prefix(note, security),
+                        kursliste=has_kurs and kurs.kursliste != None and kurs.kursliste,
+                        kursliste_security=security.kursliste != None and security.kursliste,
+                        kursliste_undefined=kursliste_undefined
+                    )
             )
 
         return rows
+    
+    def _remove_symbol_prefix(self, text: Optional[str], security: Security) -> str:
+        if text and security and security.isin and security.symbol:
+            text = text.removeprefix(f"{security.symbol}({security.isin})").removeprefix(f"{security.symbol} ({security.isin})").strip()
+        return text
 
     def _component_matches(
         self,
@@ -231,9 +331,13 @@ class PaymentReconciliationCalculator:
         broker_value_chf: Optional[Decimal],
         allow_bidirectional_on_noncash: bool,
         allow_broker_above_kursliste: bool,
+        broker_capital_gain_chf: Optional[Decimal] = None,
     ) -> bool:
         if broker_value_chf is None:
             return abs(kurs_value_chf) < Decimal("0.01")
+        
+        if kurs_value_chf is None:
+            return abs(broker_value_chf) < Decimal("0.01")
 
         if allow_bidirectional_on_noncash:
             return True
@@ -245,7 +349,13 @@ class PaymentReconciliationCalculator:
         if abs(delta) <= self.tolerance_frac * broker_value_chf:
             return True
 
-        if delta > self.tolerance_chf and allow_broker_above_kursliste:
+        if broker_capital_gain_chf is not None: 
+            delta = broker_value_chf - broker_capital_gain_chf - kurs_value_chf
+            if abs(delta) <= self.tolerance_chf:
+                return True
+            #if abs(delta) <= self.tolerance_frac * broker_value_chf:
+            #    return True
+        elif delta > self.tolerance_chf and allow_broker_above_kursliste:
             return True
 
         return False
@@ -253,9 +363,16 @@ class PaymentReconciliationCalculator:
     def _accumulate_broker(self, agg: _BrokerAgg, payment: SecurityPayment) -> None:
         if self._is_broker_above_kursliste_allowlisted(payment):
             agg.allows_broker_above_kursliste = True
+            agg.dividend_capital_gain += payment.amount or Decimal("0")
 
         non_recoverable_original = payment.nonRecoverableTaxAmountOriginal
         withholding_claim = payment.withHoldingTaxClaim
+
+        if agg.exchange_rate is None and payment.exchangeRate is not None:
+            agg.exchange_rate = payment.exchangeRate
+
+        if payment.reportDate > self.periodTo and agg.wth_correction_late_date is None:
+            agg.wth_correction_late_date = payment.reportDate
 
         if withholding_claim is not None and withholding_claim != 0:
             agg.withholding += withholding_claim
@@ -282,8 +399,10 @@ class PaymentReconciliationCalculator:
         if agg.exchange_rate is None and payment.exchangeRate is not None:
             agg.exchange_rate = payment.exchangeRate
         payment_type = payment.payment_type_original
-        if payment_type is not None and payment_type != PaymentTypeOriginal.STANDARD:
+        if payment_type is not None and payment_type != PaymentTypeOriginal.STANDARD and (payment_type != PaymentTypeOriginal.FUND_ACCUMULATION or ((not payment.remark or len(payment.remark) == 0) and not payment.undefined and (payment.sign is None or payment.sign not in ("(I)")))):
             agg.noncash = True
+        if agg.currency is None and payment.amountCurrency is not None:
+            agg.currency = payment.amountCurrency
 
         if self._is_broker_above_kursliste_allowlisted(payment):
             agg.allows_broker_above_kursliste = True
@@ -291,7 +410,12 @@ class PaymentReconciliationCalculator:
         # Detect payments that were already capped by WithholdingCapCalculator.
         if payment.withholding_capped:
             agg.has_capped_payment = True
-            agg.original_withholding_chf = payment.withholding_capped_original_wht_chf
+            agg.original_withholding_chf = payment.withholding_capped_original_wht_chf + (agg.original_withholding_chf if agg.original_withholding_chf is not None else Decimal("0"))
+        elif payment.withholding_added and not agg.has_capped_payment:
+            agg.has_added_withholding = True
+            agg.original_withholding_chf = payment.withholding_added_original_wht_chf + (agg.original_withholding_chf if agg.original_withholding_chf is not None else Decimal("0"))
+
+        agg.kursliste = payment.kursliste
 
     def _is_broker_above_kursliste_allowlisted(self, payment: SecurityPayment) -> bool:
         if payment.sign is not None and payment.sign in self._BROKER_ABOVE_KURSLISTE_ALLOWLIST_SIGNS:
@@ -308,3 +432,53 @@ class PaymentReconciliationCalculator:
             for keyword in self._BROKER_ABOVE_KURSLISTE_ALLOWLIST_KEYWORDS
             for value in lowered_values
         )
+
+    def _reconcile_tax_value(self, security: Security) -> List[TaxValueReconciliationRow]:
+        rows: List[TaxValueReconciliationRow] = []
+        tax_value = security.taxValue
+        if not tax_value or not getattr(tax_value, 'quantity', None):
+            return rows
+        
+        status = "match"
+        matched = True
+        note = ""
+        exchange_rate = tax_value.exchangeRate
+        if getattr(tax_value, 'kursliste', None):
+            ref_date = tax_value.referenceDate
+            balance_chf = getattr(tax_value, "balance_CHF", None)
+            exchange_rate_kl = getattr(tax_value, "exchangeRateKursliste", None)
+            if exchange_rate_kl:
+                exchange_rate = exchange_rate_kl
+            if not ref_date or self._component_matches(tax_value.value, balance_chf, False, False) == False:
+                status = "mismatch"        
+                matched = False
+                if tax_value.value and balance_chf:
+                    diff_chf = tax_value.value - balance_chf
+                    decimal_value = Decimal(str(diff_chf)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    formatted = '{:,.2f}'.format(decimal_value).replace(',', "'")
+                    if diff_chf > 0:
+                        formatted = f"+{formatted}"
+                    note = f"Diff CHF {formatted}"
+        elif getattr(tax_value, 'undefined', None) and tax_value.balance and abs(tax_value.balance) > Decimal("0.01"):
+                status = "mismatch"        
+                matched = False
+
+        rows.append(
+            TaxValueReconciliationRow(
+                country=security.country,
+                security=security.securityName,
+                kursliste_value_chf=tax_value.value,
+                broker_amount=tax_value.balance,
+                broker_amount_currency=tax_value.balanceCurrencyBroker,
+                exchange_rate=exchange_rate,
+                matched=matched,
+                status=status,
+                note=note,
+                kursliste=getattr(tax_value, 'kursliste', None) or False,
+                kursliste_security=security.kursliste != None and security.kursliste,
+                kursliste_undefined=getattr(tax_value, 'undefined', None)
+            )
+        )
+
+        return rows
+    

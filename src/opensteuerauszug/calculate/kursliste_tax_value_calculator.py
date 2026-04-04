@@ -1,14 +1,15 @@
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, List, Set
+from datetime import date
 import logging
 
 from ..core.exchange_rate_provider import ExchangeRateProvider
 from ..core.kursliste_exchange_rate_provider import KurslisteExchangeRateProvider
 from ..core.kursliste_manager import KurslisteManager
 from ..core.flag_override_provider import FlagOverrideProvider
-from ..model.ech0196 import Security, SecurityTaxValue, SecurityPayment, SecurityStock, PaymentTypeOriginal
-from ..model.kursliste import PaymentTypeESTV, SecurityGroupESTV
+from ..model.ech0196 import Security, SecurityTaxValue, SecurityPayment, SecurityStock, PaymentTypeOriginal, ISINType
+from ..model.kursliste import PaymentTypeESTV, SecurityGroupESTV, Da1Rate, PaymentBond, Security as KurslisteSecurity
 from ..model.critical_warning import CriticalWarning, CriticalWarningCategory
 from ..core.position_reconciler import PositionReconciler
 from ..core.constants import WITHHOLDING_TAX_RATE
@@ -99,8 +100,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         if isinstance(exchange_rate_provider, KurslisteExchangeRateProvider):
             self.kursliste_manager = exchange_rate_provider.kursliste_manager
         self.flag_override_provider = flag_override_provider
-        self._current_kursliste_security = None
-        self._current_security_is_zero_balance_option = False
+        self._current_kursliste_security: KurslisteSecurity = None
         self._missing_kursliste_entries = []
         self._stock_split_warnings: List[dict] = []
         self._previous_year_exdate_warnings = []
@@ -120,19 +120,20 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         if self._missing_kursliste_entries:
             logger.warning("Missing Kursliste entries for securities:")
             for entry in self._missing_kursliste_entries:
-                logger.warning("  - %s", entry)
-                result.critical_warnings.append(
-                    CriticalWarning(
-                        category=CriticalWarningCategory.MISSING_KURSLISTE,
-                        message=(
-                            f"Security {entry} was not found in the Kursliste. "
-                            "Tax values and income for this security may be "
-                            "incorrect or missing."
-                        ),
-                        source="KurslisteTaxValueCalculator",
-                        identifier=entry,
+                if not entry in self._removed_sec_identifiers:
+                    logger.warning("  - %s", entry)
+                    result.critical_warnings.append(
+                        CriticalWarning(
+                            category=CriticalWarningCategory.MISSING_KURSLISTE,
+                            message=(
+                                f"Security {entry} was not found in the Kursliste. "
+                                "Tax values and income for this security may be "
+                                "incorrect or missing."
+                            ),
+                            source="KurslisteTaxValueCalculator",
+                            identifier=entry,
+                        )
                     )
-                )
         for warning_info in self._stock_split_warnings:
             result.critical_warnings.append(
                 CriticalWarning(
@@ -199,12 +200,17 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 except Exception:
                     valor_int = kl_sec.valorNumber
                 self._set_field_value(security, "valorNumber", valor_int, path_prefix)
+
+            self._set_field_value(security, "kursliste", True, path_prefix)
         else:
+            '''
             ident = (
-                security.isin
-                or (f"Valor {security.valorNumber}" if security.valorNumber else None)
-                or security.securityName
+                security.isin or f"Valor {security.valorNumber}"
+                if security.valorNumber
+                else security.securityName
             )
+            '''
+            ident = self._get_sec_identifier(security)
 
             # Check if this is a rights issue or zero-balance option that we should ignore if not found
             is_rights = security.is_rights_issue
@@ -249,10 +255,21 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     self._set_field_value(sec_tax_value, "value", value, path_prefix)
                     # The Kursliste price is in CHF, so if balance was previously set
                     # (e.g. from the broker's position value), it must be updated to the CHF value.
-                    self._set_field_value(sec_tax_value, "balance", value, path_prefix)
+                    #self._set_field_value(sec_tax_value, "balance", value, path_prefix)
                     self._set_field_value(sec_tax_value, "exchangeRate", Decimal("1"), path_prefix)
                     self._set_field_value(sec_tax_value, "balanceCurrency", "CHF", path_prefix)
                     self._set_field_value(sec_tax_value, "kursliste", True, path_prefix)
+
+                    balanceCurrencyBroker = getattr(sec_tax_value, "balanceCurrencyBroker", None)
+                    if balanceCurrencyBroker and sec_tax_value.balance:
+                        chf_value, rate = self._convert_to_chf(
+                            sec_tax_value.balance,
+                            sec_tax_value.balanceCurrencyBroker,
+                            f"{path_prefix}.exchangeRate",
+                            ref_date
+                        )
+                        self._set_field_value(sec_tax_value, "balance_CHF", chf_value, path_prefix)
+                        self._set_field_value(sec_tax_value, "exchangeRateKursliste", rate, path_prefix)
                     return
         elif self._current_security_is_zero_balance_option:
             # The option position was fully closed before year-end: value is definitively 0.
@@ -310,6 +327,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         event for this security falls between those dates.
         """
         sec_ident = security.isin or security.securityName
+        peer_isin: ISINType = None
 
         # When valorNumberNew points to the same security (e.g. Kursliste records the
         # new valor as identical to the existing one), treat it as a same-ISIN split.
@@ -356,7 +374,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             found = [
                 stock
                 for stock in security.stock
-                if stock.mutation and stock.referenceDate == candidate
+                if stock.mutation and stock.referenceDate == candidate and stock.corpAction
             ]
             if found:
                 if candidate != primary_date:
@@ -384,6 +402,13 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             split_lookup_year = reconciliation_date.year
 
         if valor_number_new is None:
+            expected_removal = -quantity
+            for m in mutations_on_date:
+                if m.corpActionPeerIsin and m.quantity == expected_removal:
+                    peer_isin = m.corpActionPeerIsin
+                    break
+
+        if valor_number_new is None and peer_isin is None:
             # ---- Same-ISIN split: look for a single delta on this security ----
             expected_delta = quantity * (ratio_new / ratio_present - Decimal("1"))
             if not mutations_on_date:
@@ -419,7 +444,8 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         else:
             # ---- Cross-ISIN split (valorNumberNew): two securities involved ----
             expected_removal = -quantity
-            expected_addition = quantity * ratio_new / ratio_present
+            expected_addition = round(quantity * ratio_new / ratio_present, 1)
+            valor_number_or_isin_new_desc = f"valor {valor_number_new}" if valor_number_new else f"isin {peer_isin}"
 
             # 1. Validate the negative mutation on the old (current) security
             mutation_quantities = {m.quantity for m in mutations_on_date}
@@ -429,7 +455,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     f"{mutation_date}: expected a removal mutation of "
                     f"{expected_removal} shares on the old security (split "
                     f"ratio {ratio_new}:{ratio_present}, pre-split position "
-                    f"{quantity}, new valor {valor_number_new}), but the "
+                    f"{quantity}, new {valor_number_or_isin_new_desc}), but the "
                     f"mutations found on that date have quantities "
                     f"{sorted(mutation_quantities)}. "
                     f"Please verify this security manually."
@@ -443,11 +469,11 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             # 2. Validate the positive mutation on the new security
             new_security = None
             for sec in self._all_securities:
-                if sec.valorNumber == valor_number_new:
+                if (valor_number_new and sec.valorNumber == valor_number_new) or (peer_isin and sec.isin == peer_isin):
                     new_security = sec
                     break
 
-            if new_security is None and self.kursliste_manager and split_lookup_year is not None:
+            if new_security is None and self.kursliste_manager and split_lookup_year is not None and valor_number_new:
                 accessor = self.kursliste_manager.get_kurslisten_for_year(split_lookup_year)
                 if accessor:
                     new_kl_security = accessor.get_security_by_valor(int(valor_number_new))
@@ -461,7 +487,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 msg = (
                     f"{event_type.capitalize()} with ISIN change for {sec_ident} on "
                     f"{mutation_date}: the Kursliste split legend "
-                    f"references new valor number {valor_number_new}, but no "
+                    f"references new {valor_number_or_isin_new_desc}, but no "
                     f"security with that valor number was found in the tax "
                     f"statement. This typically means the broker's corporate "
                     f"action for the new ISIN was not imported. Expected "
@@ -484,7 +510,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 found = [
                     stock
                     for stock in new_security.stock
-                    if stock.mutation and stock.referenceDate == candidate
+                    if stock.mutation and stock.referenceDate == candidate and stock.corpAction
                 ]
                 if found:
                     new_mutation_date = candidate
@@ -511,7 +537,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 msg = (
                     f"{event_type.capitalize()} with ISIN change for {sec_ident} on "
                     f"{new_mutation_date}: the new security "
-                    f"{new_sec_ident} (valor {valor_number_new}) has "
+                    f"{new_sec_ident} ({valor_number_or_isin_new_desc}) has "
                     f"mutations with quantities "
                     f"{sorted(new_mutation_quantities)} on the split date, "
                     f"but expected an addition of {expected_addition} shares "
@@ -525,18 +551,33 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 )
                 return
 
-            logger.info(
-                "Validated cross-ISIN %s for %s on %s: "
-                "removed %s shares from old security, added %s shares "
-                "to new security %s (valor %s).",
-                event_type,
-                sec_ident,
-                mutation_date,
-                expected_removal,
-                expected_addition,
-                new_sec_ident,
-                valor_number_new,
-            )
+            if valor_number_new:
+                logger.info(
+                    "Validated cross-ISIN stock split for %s on %s: "
+                    "removed %s shares from old security, added %s shares "
+                    "to new security %s (%s).",
+                    sec_ident,
+                    reconciliation_date,
+                    expected_removal,
+                    expected_addition,
+                    new_sec_ident,
+                    valor_number_or_isin_new_desc,
+                )
+            else:
+                logger.warning(
+                    "Validated cross-ISIN stock split for %s on %s: "
+                    "removed %s shares from old security, added %s shares "
+                    "to new security %s (%s). " 
+                    "However, stock split in kursliste does not state new valor. "
+                    "Please verify this security manually.",
+                    sec_ident,
+                    mutation_date,
+                    expected_removal,
+                    expected_addition,
+                    new_sec_ident,
+                    valor_number_or_isin_new_desc,
+                )
+
 
     def computePayments(self, security: Security, path_prefix: str) -> None:
         """Compute payments for a security using the Kursliste."""
@@ -583,10 +624,13 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             if hasattr(pay, "capitalGain") and pay.capitalGain:
                 continue
 
-            reconciliation_date = pay.exDate or pay.paymentDate
+            if isinstance(pay, PaymentBond):
+                reconciliation_date = pay.paymentDate
+            else:
+                reconciliation_date = pay.exDate or pay.paymentDate
 
             # Warn if exDate is in the previous year (before the tax period)
-            if pay.exDate and security.taxValue and security.taxValue.referenceDate:
+            if not isinstance(pay, PaymentBond) and pay.exDate and security.taxValue and security.taxValue.referenceDate:
                 tax_year = security.taxValue.referenceDate.year
                 if pay.exDate.year < tax_year:
                     sec_ident = security.isin or security.securityName
@@ -607,7 +651,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                         }
                     )
 
-            pos = reconciler.synthesize_position_at_date(reconciliation_date, assume_zero_if_no_balances=True)
+            pos = reconciler.synthesize_position_at_date(reconciliation_date, assume_zero_if_no_balances=True, security=security)
             if pos is None:
                 for l in reconciler.get_log():
                     logger.debug(l)
@@ -657,6 +701,14 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     ):
                         continue
 
+                if pay.paymentType == PaymentTypeESTV.OTHER_BENEFIT and pay.variant and pay.paymentValueCHF not in (None, Decimal("0")):
+                    legends = getattr(pay, "legend", [])
+                    if any(legend for legend in legends if hasattr(legend, "text") and any(t for t in legend.text if "wahlweise" in t.value.lower() and "dividende in aktien" in t.value.lower())):
+                        logger.warning(
+                            f"Payment has multiple options, skipping option {pay.variant} {pay.paymentValueCHF} for {security.isin or security.securityName} on {pay.paymentDate}."
+                        )
+                        continue
+
             # Validate sign type if present
             current_sign = pay.sign if hasattr(pay, "sign") else None
             if current_sign is not None and current_sign not in KNOWN_SIGN_TYPES:
@@ -701,13 +753,14 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             if pay.undefined:
                 sec_payment = SecurityPayment(
                     paymentDate=pay.paymentDate,
-                    exDate=pay.exDate,
+                    exDate=pay.exDate if hasattr(pay, "exDate") else pay.paymentDate,
                     name=payment_name,
                     quotationType=security.quotationType,
                     quantity=quantity,
                     amountCurrency=security.currency,
                     kursliste=True,
                     payment_type_original=payment_type_original,
+                    remark=pay.remark
                 )
                 sec_payment.undefined = True
                 if pay.sign is not None:
@@ -742,7 +795,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
             sec_payment = SecurityPayment(
                 paymentDate=pay.paymentDate,
-                exDate=pay.exDate,
+                exDate=pay.exDate if hasattr(pay, "exDate") else pay.paymentDate,
                 name=payment_name,
                 quotationType=security.quotationType,
                 quantity=quantity,
@@ -752,6 +805,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 exchangeRate=rate,
                 kursliste=True,
                 payment_type_original=payment_type_original,
+                remark=pay.remark
             )
 
             # Not all payment subtypes have these fields
@@ -804,7 +858,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     reference_date=pay.paymentDate,
                 )
 
-                if da1_rate and effective_sign != "(Z)":
+                if da1_rate and effective_sign != "(Z)" and self.include_da1(security, pay.paymentDate, da1_rate):
                     lump_sum_amount = chf_amount * da1_rate.value / Decimal(100)
                     non_recoverable_amount = chf_amount * da1_rate.nonRecoverable / Decimal(100)
                     if lump_sum_amount > 0 or non_recoverable_amount > 0:
@@ -824,3 +878,14 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             result.append(sec_payment)
 
         self.setKurslistePayments(security, result, path_prefix)
+
+    def include_da1(self, security: Security, pay_date: date, da1_rate: Da1Rate) -> bool:
+        if da1_rate and da1_rate.value and da1_rate.value != 0 and not da1_rate.country in ("CH", "US"):
+            for pay in security.broker_payments:
+                # find any tax record on the same date
+                if pay.paymentDate == pay_date and pay.amount and pay.nonRecoverableTaxAmountOriginal and pay.amount == -pay.nonRecoverableTaxAmountOriginal:
+                    return True
+            logger.warning(f"DA-1 rate of {da1_rate.value}% for country {da1_rate.country} is available, but no taxable broker payment found on the same date {pay_date} for security '{security.get_ident_desc()}'. DA-1 will not be applied.")
+            return False
+            
+        return True

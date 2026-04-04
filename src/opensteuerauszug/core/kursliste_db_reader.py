@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
 
-from opensteuerauszug.model.kursliste import (
+from ..model.kursliste import (
     Security, Share, Bond, Fund, Derivative, CoinBullion, CurrencyNote, LiborSwap,
     SecurityTypeESTV, Sign, Da1Rate, Da1RateType, SecurityGroupESTV
 )

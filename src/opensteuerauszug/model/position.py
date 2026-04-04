@@ -1,7 +1,7 @@
 from typing import Optional, Union, Literal, List, Any
 from pydantic import BaseModel, Field, field_validator, PrivateAttr
 
-from opensteuerauszug.model.ech0196 import ISINType, ValorNumber
+from ..model.ech0196 import ISINType, ValorNumber
 
 class BasePosition(BaseModel):
     depot: str
@@ -70,7 +70,7 @@ class SecurityPosition(BasePosition):
 
     def get_processing_identifier(self) -> str:
         if self._identifier_str is None:
-            self._identifier_str = f"{self.depot}-{self.symbol}"
+            self._identifier_str = f"{self.depot}-{self.symbol}--{self.isin if self.isin else self.description}"
         return self._identifier_str
 
     def get_balance_name_prefix(self) -> str:
