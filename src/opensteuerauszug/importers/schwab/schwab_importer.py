@@ -3,19 +3,19 @@ import pprint
 from typing import List, Dict, Any, Optional, Tuple
 import os
 from decimal import Decimal
-from ...model.ech0196 import (
+from opensteuerauszug.model.ech0196 import (
     BankAccountName, Institution, ListOfSecurities, ListOfBankAccounts, TaxStatement, Depot, Security, BankAccount, BankAccountPayment, SecurityStock, SecurityPayment, DepotNumber, BankAccountNumber, CurrencyId, QuotationType, BankAccountTaxValue, Client, ClientNumber
 )
-from ...model.position import BasePosition, SecurityPosition, CashPosition, Position
+from opensteuerauszug.model.position import BasePosition, SecurityPosition, CashPosition, Position
 from .statement_extractor import StatementExtractor
 from datetime import date, timedelta
 from .fallback_position_extractor import FallbackPositionExtractor
 from .position_extractor import PositionExtractor
 from .transaction_extractor import TransactionExtractor
-from ...util.date_coverage import DateRangeCoverage
+from opensteuerauszug.util.date_coverage import DateRangeCoverage
 from collections import defaultdict
-from ...core.position_reconciler import PositionReconciler, ReconciledQuantity
-from ...config.models import SchwabAccountSettings # Add this
+from opensteuerauszug.core.position_reconciler import PositionReconciler, ReconciledQuantity
+from opensteuerauszug.config.models import SchwabAccountSettings # Add this
 
 logger = logging.getLogger(__name__)
 

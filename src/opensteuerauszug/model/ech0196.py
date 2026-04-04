@@ -30,8 +30,8 @@ from ..core.constants import NON_TAXABLE_SIGNS
 
 from ..model.kursliste import Remark
 
-from ..model.critical_warning import CriticalWarning
-from ..model.payment_reconciliation import PaymentReconciliationReport
+from opensteuerauszug.model.critical_warning import CriticalWarning
+from opensteuerauszug.model.payment_reconciliation import PaymentReconciliationReport
 
 logger = logging.getLogger(__name__)
 
