@@ -101,6 +101,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             self.kursliste_manager = exchange_rate_provider.kursliste_manager
         self.flag_override_provider = flag_override_provider
         self._current_kursliste_security: KurslisteSecurity = None
+        self._current_security_is_zero_balance_option = False
         self._missing_kursliste_entries = []
         self._stock_split_warnings: List[dict] = []
         self._previous_year_exdate_warnings = []
