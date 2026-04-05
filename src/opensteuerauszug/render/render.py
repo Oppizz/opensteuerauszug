@@ -977,7 +977,7 @@ def _select_template_file(templates_path: Path, base_name: str, language: str) -
     raise FileNotFoundError(f"No template found for {base_name} in {language} or {DEFAULT_LANGUAGE}")
 
 
-def create_dual_info_boxes(styles, usable_width, minimal: bool = False):
+def create_dual_info_boxes(styles, usable_width, minimal: bool = False, mixed: bool = False):
     """Create two side-by-side information boxes for the first page."""
     templates_path = Path(__file__).parent / 'templates'
 
@@ -996,7 +996,7 @@ def create_dual_info_boxes(styles, usable_width, minimal: bool = False):
     with open(templates_path / right_file, 'r', encoding='utf-8') as f:
         right_markdown = f.read()
 
-    left_flowables = markdown_to_platypus(left_markdown, styles=styles, section='short-version')
+    left_flowables = markdown_to_platypus(left_markdown, styles=styles, section='short-version-mixed' if mixed and not minimal else 'short-version')
     right_flowables = markdown_to_platypus(right_markdown, styles=styles, section='short-version')
 
     table = Table(
@@ -2462,6 +2462,7 @@ def render_tax_statement(
     override_org_nr: Optional[str] = None,
     minimal_frontpage_placeholder: bool = False,
     language: str = DEFAULT_LANGUAGE,
+    mixed_source: bool = False
 ) -> Path:
     """Render a tax statement to PDF.
     
@@ -2472,6 +2473,7 @@ def render_tax_statement(
         minimal_frontpage_placeholder: If True, replace the summary on the first
             page with a placeholder suitable for minimal tax statements
         language: Language code for translations (default: 'de')
+        mixed_source: If True, indicates that the tax statement is generated from mixed sources (Kursliste and Broker)
 
     Returns:
         Path to the generated PDF file
@@ -2569,7 +2571,7 @@ def render_tax_statement(
     if use_minimal_frontpage:
         story.append(create_minimal_placeholder(styles))
         story.append(Spacer(1, 0.5*cm))
-        story.append(create_dual_info_boxes(styles, usable_width, minimal=True))
+        story.append(create_dual_info_boxes(styles, usable_width, minimal=True, mixed=mixed_source))
     else:
         # Extract tax period and period end date - both are mandatory in the model
         tax_period = str(tax_statement.taxPeriod)
@@ -2631,7 +2633,7 @@ def render_tax_statement(
         story.append(Spacer(1, 0.5*cm))
 
         # Info boxes below the summary table
-        story.append(create_dual_info_boxes(styles, usable_width))
+        story.append(create_dual_info_boxes(styles, usable_width, mixed=mixed_source))
 
     # Show a prominent hint on the summary page when critical warnings exist
     if critical_warnings:
@@ -2714,7 +2716,7 @@ def render_tax_statement(
         tax_payer_markdown = f.read()
 
     story.append(PageBreak())
-    story.extend(create_single_info_page(tax_office_markdown, styles, section='long-version'))
+    story.extend(create_single_info_page(tax_office_markdown, styles, section='long-version-mixed' if mixed_source and not use_minimal_frontpage else 'long-version'))
     story.append(PageBreak())
     story.extend(create_single_info_page(tax_payer_markdown, styles, section='long-version'))
 

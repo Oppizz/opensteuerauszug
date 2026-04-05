@@ -61,7 +61,9 @@ class SectionExtractorTreeprocessor(Treeprocessor):
                 element = root[i]
                 if element.tag == 'p' and element.text and (
                     element.text.strip() == "{: .short-version }" or
-                    element.text.strip() == "{: .long-version }"
+                    element.text.strip() == "{: .short-version-mixed }" or
+                    element.text.strip() == "{: .long-version }" or
+                    element.text.strip() == "{: .long-version-mixed }"
                 ):
                     end_marker_index = i
                     break

@@ -690,6 +690,7 @@ def process(
                     and minimal_frontpage_placeholder_setting
                 ),
                 language=render_language,
+                mixed_source=tax_calculation_level == TaxCalculationLevel.BROKER_FILL_IN,
             )
             print(f"Rendering successful to {rendered_path}")
 

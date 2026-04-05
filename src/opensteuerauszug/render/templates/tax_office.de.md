@@ -11,6 +11,15 @@ Sämtliche Steuerberechnungen basieren auf der Kursliste und dienen nur Informat
 
 Für mehr Information siehe die Seite "Hinweis für die Steuerbehörde"
 
+{: .short-version-mixed }
+
+Dieser Steuerauszug wurde von den Steuerpflichtigen mit Hilfe von OpenSteuerauszug aus elektronischen Bankdaten erstellt.
+Er dient der Vereinfachung vollständiger Dateneigenhabe und der Vermeidung von Tippfehlern.
+
+Die Steuerberechnungen dienen nur Informationszwecken. 
+
+Für mehr Information siehe die Seite "Hinweis für die Steuerbehörde"
+
 {: .long-version }
 
 ## Zweck
@@ -28,6 +37,43 @@ Die Verantwortung für die Richtigkeit und Vollständigkeit obliegt immer noch d
 - Die definitive auf der Kursliste basierende Steuerberechnung sollte von der Steuersoftware und/oder Veranlagungssoftware übernommen werden.
 
 Sämtliche Steuerberechnungen in dieser Datei basieren auf der Kursliste und dienen nur Informationszwecken.
+
+## Wieso ein Steuerauszug?
+
+Leider besteht keine standardisierte Möglichkeit, nur Positions- oder
+Transaktionsdaten in PrivateTax oder ähnliche Software zu importieren.
+
+Ausländische Finanzinstitute stellen keine (E-)Steuerauszüge bereit. Der
+Autor von der OpenSteuerauszug-Software ist der Meinung, dass eine
+automatisierte Datenübernahme trotzdem von Vorteil ist. Zumal die
+Steuersoftware in der Lage ist, die steuerrelevanten Berechnungen zu
+korrigieren und/oder zu vervollständigen.
+
+## Anliegen / Verbesserungsvorschläge
+
+Der Autor hofft, die Arbeit aller Parteien zu
+erleichtern. Anliegen / Verbesserungsvorschläge werden über GitHub
+entgegen genommen.
+
+{: .long-version-mixed }
+
+## Zweck
+
+Dieser Steuerauszug wurde von den Steuerpflichtigen mit Hilfe von
+OpenSteuerauszug (https://github.com/vroonhof/opensteuerauszug) aus
+elektronischen Daten des Finanzinstituts erstellt. Er dient der Vereinfachung
+vollständiger Dateneigenhabe und der Vermeidung von Tippfehlern.
+
+## Daten
+
+Die Verantwortung für die Richtigkeit und Vollständigkeit obliegt immer noch dem Steuerpflichtigen.
+
+- Er/Sie kontrolliert Bestände, Transaktionen, Valorennummern und Zinszahlungen.
+- Die definitive auf der Kursliste basierende Steuerberechnung sollte von der Steuersoftware und/oder Veranlagungssoftware übernommen werden.
+
+Die Steuerberechnungen dienen nur Informationszwecken.
+Sie basieren auf der Kursliste, sofern Daten anhand ISIN- oder Valor-Kennungen verfügbar sind,
+andernfalls werden Broker-Werte verwendet.
 
 ## Wieso ein Steuerauszug?
 
