@@ -109,6 +109,7 @@ def process(
     filter_to_period_flag: bool = typer.Option(True, "--filter-to-period/--no-filter-to-period", help="Filter transactions and stock events to the tax period (with closing balances). Defaults to enabled."),
     tax_calculation_level: TaxCalculationLevel = typer.Option(TaxCalculationLevel.KURSLISTE, "--tax-calculation-level", help="Specify the level of detail for tax value calculations."),
     skip_broker_payments_from_reconciliation: bool = typer.Option(False, "--skip-broker-payments-from-reconciliation", help="Whether to skip broker payments when performing payment reconciliation. Defaults to False (include broker payments)."),
+    use_broker_exch_rate: bool = typer.Option(False, "--use-broker-exch-rate", help="When filling in tax values, use the broker-provided exchange rate if available. Defaults to False (do not use broker exchange rate)."),
     log_level: LogLevel = typer.Option(LogLevel.INFO, "--log-level", help="Set the log level for console output."),
     log_file: Optional[Path] = typer.Option(None, "--log-file", help="Write logs to this file."),
     config_file: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to the configuration TOML file. Defaults to config.toml in CWD or XDG config home."),
@@ -483,6 +484,8 @@ def process(
                 print("Running BrokerFillInTaxValueCalculator...")
                 calculator_name = "BrokerFillInTaxValueCalculator"
                 tax_value_calculator = BrokerFillInTaxValueCalculator(mode=CalculationMode.OVERWRITE, exchange_rate_provider=exchange_rate_provider, keep_existing_payments=config_manager.calculate_settings.keep_existing_payments)
+                if use_broker_exch_rate:
+                    tax_value_calculator.use_broker_exch_rate = True
 
             if tax_value_calculator and calculator_name:
                 if config_manager.calculate_settings.remove_zero_positions:

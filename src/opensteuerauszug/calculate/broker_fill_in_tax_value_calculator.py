@@ -5,7 +5,6 @@ from typing import Optional, List, Set
 import logging
 
 from .kursliste_tax_value_calculator import KurslisteTaxValueCalculator
-from .fill_in_tax_value_calculator import FillInTaxValueCalculator
 from .base import CalculationMode
 from ..core.exchange_rate_provider import ExchangeRateProvider
 from ..core.position_reconciler import PositionReconciler
@@ -42,13 +41,16 @@ KNOWN_SIGN_TYPES: Set[str] = {
     "(Z)",  # Without withholding tax
 }
 
-class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
+class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
     """
     Calculator that fills in missing values based on other available data,
     potentially after Kursliste and minimal calculations have been performed.
     """
     def __init__(self, mode: CalculationMode, exchange_rate_provider: ExchangeRateProvider, flag_override_provider: Optional[FlagOverrideProvider] = None, keep_existing_payments: bool = False):
         super().__init__(mode, exchange_rate_provider, flag_override_provider=flag_override_provider, keep_existing_payments=keep_existing_payments)
+
+        self.use_broker_exch_rate = False
+
         logger.info(
             "BrokerFillInTaxValueCalculator initialized with mode: %s and provider: %s",
             mode.value,
@@ -97,7 +99,7 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
         if self._current_kursliste_security:
             super().computePayments(security, path_prefix)
             if (payment_list and len(payment_list)>0 and any(p for p in payment_list if p.sign is None or p.sign not in NON_TAXABLE_SIGNS) and
-                   (security.payment == None or len(security.payment) == 0 or 
+                   (security.payment is None or len(security.payment) == 0 or 
                         any(p for p in security.payment if p.kursliste and (
                             (p.amount and p.amount != Decimal("0")) or 
                               (not p.undefined and p.payment_type_original != PaymentTypeOriginal.FUND_ACCUMULATION) or not p.remark or len(p.remark) == 0) == False))):
@@ -165,8 +167,6 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
 
             pos = reconciler.synthesize_position_at_date(reconciliation_date, assume_zero_if_no_balances=True, security=security)
             if pos is None:
-                for l in reconciler.get_log():
-                    logger.debug(l)
                 raise ValueError(
                     f"No position found for {security.isin or security.securityName} on date {reconciliation_date}"
                 )
@@ -177,39 +177,7 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
             if quantity == 0:
                 # Skip payment generation if the quantity of outstanding securities is zero
                 continue
-            '''
-            if pay.taxEvent:
-                legends = getattr(pay, "legend", [])
-                split_legend = next(
-                    (
-                        legend
-                        for legend in legends
-                        if legend.exchangeRatioPresent is not None
-                        and legend.exchangeRatioNew is not None
-                    ),
-                    None,
-                )
-                if split_legend:
-                    ratio_present = split_legend.exchangeRatioPresent
-                    ratio_new = split_legend.exchangeRatioNew
-                    valor_number_new = split_legend.valorNumberNew
-                    if ratio_present:
-                        self._validate_stock_split(
-                            security=security,
-                            reconciliation_date=reconciliation_date,
-                            quantity=quantity,
-                            ratio_present=ratio_present,
-                            ratio_new=ratio_new,
-                            valor_number_new=valor_number_new,
-                        )
-
-                    if pay.paymentValueCHF in (None, Decimal("0")) and pay.paymentValue in (
-                        None,
-                        Decimal("0"),
-                    ):
-                        continue
-            '''
-
+            
             # Validate sign type if present
             current_sign = pay.sign if hasattr(pay, "sign") else None
             if current_sign is not None and current_sign not in KNOWN_SIGN_TYPES:
@@ -230,16 +198,16 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
                 continue
 
             payment_name = f"KL:{security.securityName}"
-            securityType = ""
-            securityGroup: SecurityGroupESTV = None
+            security_type = ""
+            security_group: SecurityGroupESTV = None
             if security.securityCategory == "SHARE":
                 payment_name = "Dividend"
-                securityType = "SHARE.NOMINAL"
-                securityGroup = SecurityGroupESTV.SHARE
+                security_type = "SHARE.NOMINAL"
+                security_group = SecurityGroupESTV.SHARE
             elif security.securityCategory == "BOND":
                 payment_name = "Distribution"
-                securityType = "BOND.BOND"
-                securityGroup = SecurityGroupESTV.BOND
+                security_type = "BOND.BOND"
+                security_group = SecurityGroupESTV.BOND
             else:
                 raise ValueError(f"Security Category not supported {security.securityCategory} ({security.securityName})")
 
@@ -250,55 +218,33 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
             #if pay.paymentType is not None and pay.paymentType != PaymentTypeESTV.STANDARD:
             #    payment_type_original = PaymentTypeOriginal(pay.paymentType.value)
 
-            if pay.undefined:
-                sec_payment = SecurityPayment(
-                    paymentDate=pay.paymentDate,
-                    exDate=pay.exDate if hasattr(pay, "exDate") else pay.paymentDate,
-                    name=payment_name,
-                    quotationType=security.quotationType,
-                    quantity=quantity,
-                    amountCurrency=security.currency,
-                    #kursliste=True,
-                    payment_type_original=payment_type_original,
-                )
-                sec_payment.undefined = True
-                if pay.sign is not None:
-                    sec_payment.sign = pay.sign
-                if hasattr(pay, "gratis") and pay.gratis is not None:
-                    sec_payment.gratis = pay.gratis
-                result.append(sec_payment)
-                continue
-
-            paymentValue: Decimal = pay.amount / quantity
-            exchangeRate: Decimal = None
-            paymentValueCHF: Decimal = None 
-            if pay.amountCurrency != "CHF":
-                paymentValueCHF, exchangeRate = self._convert_to_chf(
-                    pay.amount,
-                    pay.amountCurrency,
-                    f"{path_prefix}.exchangeRate",
-                    pay.paymentDate
-                )
-                paymentValueCHF = paymentValueCHF / quantity
+            payment_value: Decimal = pay.amount / quantity
+            exchange_rate: Decimal = None
+            chf_amount: Decimal = None
+            if pay.amountCurrency and pay.amountCurrency != "CHF":
+                if pay.exchangeRate is not None and self.use_broker_exch_rate:
+                    exchange_rate = pay.exchangeRate
+                    chf_amount = pay.amount * exchange_rate
+                else:
+                    chf_amount, exchange_rate = self._convert_to_chf(
+                        pay.amount,
+                        pay.amountCurrency,
+                        f"{path_prefix}.exchangeRate",
+                        pay.paymentDate
+                    )
             else:
-                paymentValueCHF = pay.amount / quantity
-                exchangeRate = Decimal("1")
+                chf_amount = pay.amount
+                exchange_rate = Decimal("1")
 
-            if paymentValue is None:
+            payment_value_chf = chf_amount / quantity
+
+            if payment_value is None:
                 raise ValueError(
-                    f"Kursliste payment on {pay.paymentDate} for {security.isin or security.securityName} missing paymentValueCHF"
+                    f"Payment on {pay.paymentDate} for {security.isin or security.securityName} missing paymentValueCHF"
                 )
 
-            amount_per_unit = (
-                paymentValue if paymentValue is not None else paymentValueCHF
-            )
-            chf_per_unit = paymentValueCHF
-
-            amount = amount_per_unit * quantity
-            chf_amount = chf_per_unit * quantity
-
-            rate = exchangeRate
-            if rate is None and paymentValueCHF != 0:
+            rate = exchange_rate
+            if rate is None and payment_value_chf != 0:
                 if pay.currency == "CHF":
                     rate = Decimal("1")
                 else:
@@ -314,8 +260,8 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
                 quotationType=security.quotationType,
                 quantity=quantity,
                 amountCurrency=pay.amountCurrency,
-                amountPerUnit=amount_per_unit,
-                amount=amount,
+                amountPerUnit=payment_value,
+                amount=pay.amount,
                 exchangeRate=rate,
                 payment_type_original=payment_type_original,
             )
@@ -334,9 +280,6 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
 
             sec_payment.sign = effective_sign
 
-            if hasattr(pay, "gratis") and pay.gratis:
-                sec_payment.gratis = pay.gratis
-
             # Reality vs spec: Real-world files seem to have all three fields set when at least one is set,
             # possibly with zero values, even though our reading of the spec suggests they should be mutually exclusive
             if pay.withHoldingTaxClaim is not None:
@@ -350,8 +293,8 @@ class BrokerFillInTaxValueCalculator(FillInTaxValueCalculator):
                 sec_payment.grossRevenueB = chf_amount
                 sec_payment.withHoldingTaxClaim = Decimal("0")
 
-            da1_security_group = securityGroup
-            da1_security_type = securityType
+            da1_security_group = security_group
+            da1_security_type = security_type
             if effective_sign == "(Q)":
                 da1_security_group = SecurityGroupESTV.SHARE
                 da1_security_type = None

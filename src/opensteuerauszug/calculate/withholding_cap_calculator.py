@@ -291,6 +291,7 @@ class WithholdingCapCalculator:
         #  Broker knows better than Kursliste, so clear the (Q) sign if it was set.
         if kl_payment.sign == "(Q)":
             kl_payment.sign = None
+        kl_payment.kursliste = False
 
         self._track(security.securityName, d)
 
@@ -353,6 +354,7 @@ class WithholdingCapCalculator:
         # Only clear (Q) sign specifically.
         if kl_payment.sign == "(Q)":
             kl_payment.sign = None
+        kl_payment.kursliste = False
 
         self._track(security.securityName, d)
 

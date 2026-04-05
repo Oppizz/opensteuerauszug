@@ -453,6 +453,7 @@ class IbkrImporter:
                     'currency',
                     'CashTransaction (corrections)',
                 )
+                exch_rate = getattr(cash_tx, "fxRateToBase", None)                
 
                 sec_pos_key = self._find_processed_security_position(
                     processed_security_positions,
@@ -475,6 +476,7 @@ class IbkrImporter:
                     tx_type=tx_type,
                 )
                 sec_payment.reportDate = reportDate
+                sec_payment.exchangeRate = exch_rate
                 
                 processed_security_positions[sec_pos_key]['payments'].append(
                     sec_payment
@@ -960,6 +962,7 @@ class IbkrImporter:
                     sub_category = getattr(action, "subCategory", None)
                     if sub_category == "RIGHT":
                         rights_issue_positions.add(sec_pos)
+                    exch_rate = getattr(action, "fxRateToBase", None)
 
                     stock_mutation = SecurityStock(
                         referenceDate=action_date,
@@ -968,6 +971,7 @@ class IbkrImporter:
                         name=action_description,
                         balanceCurrency=currency,
                         quotationType="PIECE",
+                        exchangeRate=exch_rate,
                         corpAction=True
                     )
 
@@ -1050,6 +1054,8 @@ class IbkrImporter:
                         if sec_pos_key not in security_asset_category_map:
                             security_asset_category_map[sec_pos_key] = (asset_category, sub_category)
 
+                        exch_rate = getattr(cash_tx, "fxRateToBase", None)
+
                         # Update name metadata (Priority: 0 for CashTransactions - lowest)
                         # Use description or symbol if description is generic?
                         # Usually description in CashTx is like "Dividend ...". Not great for security name.
@@ -1070,6 +1076,7 @@ class IbkrImporter:
 
                         sec_payment.exDate=exDate
                         sec_payment.reportDate=reportDate
+                        sec_payment.exchangeRate=exch_rate
 
                         if tx_type in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU] and description_lower.endswith(" (return of capital)"):
                             sec_payment.sign = "(KR)"
