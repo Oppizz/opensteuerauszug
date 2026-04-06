@@ -175,11 +175,16 @@ class WithholdingCapCalculator:
                 kurs_rate_by_date[p.paymentDate] = p.exchangeRate
 
         for (d, broker_agg) in broker_wht_by_date.items():
-            kl_payment = next((p for p in kursliste_payments if p.paymentDate == d), None)
+            kl_payments_on_date = [p for p in kursliste_payments if p.paymentDate == d]
 
-            # Cannot adjust if there's no corresponding Kursliste payment on this date to adjust.
-            if not kl_payment or kl_payment.withholding_capped:
+            if not kl_payments_on_date:
                 continue
+
+            # Cannot adjust if there's already been a cap or adjustment on this date. 
+            if next((p for p in kl_payments_on_date if p.withholding_capped), None) is not None:
+                continue
+
+            kl_payment = kl_payments_on_date[0]
 
             # When broker has payments on this date but no WHT entries
             # broker effective WHT is 0.
@@ -199,13 +204,21 @@ class WithholdingCapCalculator:
             broker_wht_chf = max(Decimal("0"), broker_wht_chf)
 
             # Kursliste WHT may use withHoldingTaxClaim or nonRecoverableTaxAmount.
-            kurs_wht_chf = (
-                (kl_payment.withHoldingTaxClaim or Decimal("0"))
-                + (kl_payment.nonRecoverableTaxAmount or Decimal("0"))
+            kurs_wht_chf: Decimal = sum(
+                (p.withHoldingTaxClaim or Decimal("0")) + (p.nonRecoverableTaxAmount or Decimal("0")) for p in kl_payments_on_date
             )
 
             # No adjust needed when broker WHT is at or below kursliste.
             if broker_wht_chf <= kurs_wht_chf - self.tolerance_chf or abs(broker_wht_chf - kurs_wht_chf) <= self.tolerance_chf:
+                continue
+
+            if len(kl_payments_on_date) > 1:
+                logger.warning(
+                    f"Multiple Kursliste payments with withholding on the same "
+                    f"date for {security.securityName} on {d}. "
+                    f"Cannot apply withholding adjustment for "
+                    f"broker WHT {broker_wht_chf:.2f} CHF vs Kursliste {kurs_wht_chf:.2f} CHF."
+                )
                 continue
 
             # Decide whether this is a full reversal (≈0) or partial.
@@ -256,7 +269,7 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Capped withholding for %s on %s: Kursliste %.2f CHF -> 0.00 CHF "
+            "Capped withholding for %s on %s: Kursliste %.2f CHF → 0.00 CHF "
             "(full reversal)",
             security.securityName,
             d,
@@ -296,7 +309,7 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Adjusted withholding for %s on %s: Kursliste 0.00 CHF -> %.2f CHF "
+            "Adjusted withholding for %s on %s: Kursliste 0.00 CHF → %.2f CHF "
             "(full adjustment)",
             security.securityName,
             d,
@@ -326,7 +339,7 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Capped withholding for %s on %s: Kursliste %.2f CHF -> broker %.2f CHF "
+            "Capped withholding for %s on %s: Kursliste %.2f CHF → broker %.2f CHF "
             "(partial cap on nonRecoverableTaxAmount)",
             security.securityName,
             d,
@@ -359,7 +372,7 @@ class WithholdingCapCalculator:
         self._track(security.securityName, d)
 
         logger.info(
-            "Adjusted withholding for %s on %s: Kursliste %.2f CHF -> broker %.2f CHF "
+            "Adjusted withholding for %s on %s: Kursliste %.2f CHF → broker %.2f CHF "
             "(partial adjustment on nonRecoverableTaxAmount)",
             security.securityName,
             d,

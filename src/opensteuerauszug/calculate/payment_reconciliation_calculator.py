@@ -200,6 +200,8 @@ class PaymentReconciliationCalculator:
                     if kurs.withholding_chf is not None
                     else "Withholding capped to broker level."
                 )
+                if has_broker and broker.wth_correction_late_date is not None:
+                    note += f" Late correction on {broker.wth_correction_late_date}."
             elif has_broker and kurs.has_added_withholding:
                 status = "capped"
                 matched = True
