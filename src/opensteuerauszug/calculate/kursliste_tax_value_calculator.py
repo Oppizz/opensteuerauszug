@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, List, Set
-from datetime import date
 import logging
 
 from ..core.exchange_rate_provider import ExchangeRateProvider
@@ -859,17 +858,20 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     reference_date=pay.paymentDate,
                 )
 
-                if da1_rate and effective_sign != "(Z)" and self.include_da1(security, pay.paymentDate, da1_rate):
-                    lump_sum_amount = chf_amount * da1_rate.value / Decimal(100)
-                    non_recoverable_amount = chf_amount * da1_rate.nonRecoverable / Decimal(100)
-                    if lump_sum_amount > 0 or non_recoverable_amount > 0:
-                        sec_payment.lumpSumTaxCreditPercent = da1_rate.value
-                        sec_payment.lumpSumTaxCreditAmount = lump_sum_amount
-                        sec_payment.nonRecoverableTaxPercent = da1_rate.nonRecoverable
-                        sec_payment.nonRecoverableTaxAmount = non_recoverable_amount
-                        if kl_sec.country == "US":
-                            sec_payment.additionalWithHoldingTaxUSA = Decimal("0")
-                        sec_payment.lumpSumTaxCredit = True
+                if da1_rate and effective_sign != "(Z)":
+                    if self.include_da1(security, pay.paymentDate, da1_rate):
+                        lump_sum_amount = chf_amount * da1_rate.value / Decimal(100)
+                        non_recoverable_amount = chf_amount * da1_rate.nonRecoverable / Decimal(100)
+                        if lump_sum_amount > 0 or non_recoverable_amount > 0:
+                            sec_payment.lumpSumTaxCreditPercent = da1_rate.value
+                            sec_payment.lumpSumTaxCreditAmount = lump_sum_amount
+                            sec_payment.nonRecoverableTaxPercent = da1_rate.nonRecoverable
+                            sec_payment.nonRecoverableTaxAmount = non_recoverable_amount
+                            if kl_sec.country == "US":
+                                sec_payment.additionalWithHoldingTaxUSA = Decimal("0")
+                            sec_payment.lumpSumTaxCredit = True
+                    else:
+                        sec_payment.kursliste = False  # Explicitly mark that DA-1 was not applied due to missing taxable payment, even though a rate exists
 
             if effective_sign == "(V)":
                 raise NotImplementedError(

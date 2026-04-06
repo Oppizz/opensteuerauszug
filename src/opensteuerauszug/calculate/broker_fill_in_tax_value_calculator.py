@@ -125,6 +125,9 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
         )
         accessor = self.kursliste_manager.get_kurslisten_for_year(ref_year)
 
+        tax_payments: List[SecurityPayment] = []
+        wht_payments: List[SecurityPayment] = []
+
         for pay in payment_list:
             if not pay.paymentDate:
                 continue
@@ -133,13 +136,13 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             if pay.amount is None or pay.amount == Decimal("0"):
                 continue
 
-            # witholding position without amount is for reconciliation only
+            # witholding position is for reconciliation only
             if (pay.withHoldingTaxClaim or pay.nonRecoverableTaxAmountOriginal) and -pay.amount == (pay.withHoldingTaxClaim or pay.nonRecoverableTaxAmountOriginal):
-                continue
+                wht_payments.append(pay)
+            elif not hasattr(pay, "capitalGain") or not pay.capitalGain:
+                tax_payments.append(pay)
 
-            # Capital gains are not relevant for personal income tax and can be omitted.
-            if hasattr(pay, "capitalGain") and pay.capitalGain:
-                continue
+        for pay in tax_payments:
 
             reconciliation_date = pay.exDate or pay.paymentDate
 
@@ -280,6 +283,17 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
 
             sec_payment.sign = effective_sign
 
+            wht_this_pay = (w for w in wht_payments if w.paymentDate == pay.paymentDate and w.amountCurrency == pay.amountCurrency and (pay.brokerActionId is None or (w.brokerActionId and w.brokerActionId == pay.brokerActionId)))
+            for wht_pay in wht_this_pay:
+                if wht_pay.withHoldingTaxClaim and wht_pay.withHoldingTaxClaim != Decimal("0"):
+                    if sec_payment.withHoldingTaxClaim is None:
+                        sec_payment.withHoldingTaxClaim = Decimal("0")
+                    sec_payment.withHoldingTaxClaim += wht_pay.withHoldingTaxClaim * rate
+                if wht_pay.nonRecoverableTaxAmountOriginal and wht_pay.nonRecoverableTaxAmountOriginal != Decimal("0"):
+                    if sec_payment.nonRecoverableTaxAmount is None:
+                        sec_payment.nonRecoverableTaxAmount = Decimal("0")
+                    sec_payment.nonRecoverableTaxAmount += wht_pay.nonRecoverableTaxAmountOriginal * rate
+
             # Reality vs spec: Real-world files seem to have all three fields set when at least one is set,
             # possibly with zero values, even though our reading of the spec suggests they should be mutually exclusive
             if pay.withHoldingTaxClaim is not None:
@@ -312,11 +326,22 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                 if lump_sum_amount > 0 or non_recoverable_amount > 0:
                     sec_payment.lumpSumTaxCreditPercent = da1_rate.value
                     sec_payment.lumpSumTaxCreditAmount = lump_sum_amount
-                    sec_payment.nonRecoverableTaxPercent = da1_rate.nonRecoverable
-                    sec_payment.nonRecoverableTaxAmount = non_recoverable_amount
+                    #sec_payment.nonRecoverableTaxPercent = da1_rate.nonRecoverable
+                    #sec_payment.nonRecoverableTaxAmount = non_recoverable_amount
+
                     if security.country == "US":
-                        sec_payment.additionalWithHoldingTaxUSA = Decimal("0")
+                        if sec_payment.nonRecoverableTaxAmount > non_recoverable_amount * Decimal("1.1"):  # Allow for some small discrepancies due to rounding or data issues
+                            sec_payment.additionalWithHoldingTaxUSA = sec_payment.nonRecoverableTaxAmount - non_recoverable_amount
+                            sec_payment.nonRecoverableTaxAmount = non_recoverable_amount
+
+                        if sec_payment.additionalWithHoldingTaxUSA is None:
+                            sec_payment.additionalWithHoldingTaxUSA = Decimal("0")
                     sec_payment.lumpSumTaxCredit = True
+
+            if chf_amount and sec_payment.nonRecoverableTaxAmount and chf_amount != Decimal("0") and sec_payment.nonRecoverableTaxAmount != Decimal("0"):
+                sec_payment.nonRecoverableTaxPercent = (sec_payment.nonRecoverableTaxAmount / chf_amount * Decimal("100")).quantize(Decimal("0.2"))
+            else:
+                sec_payment.nonRecoverableTaxPercent = None
 
             if effective_sign == "(V)":
                 raise NotImplementedError(

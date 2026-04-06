@@ -445,7 +445,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
 
         if security.broker_payments:
             for pay in security.broker_payments:
-                if (hasattr(pay, "exchangeRate") == False or pay.exchangeRate is None) and pay.amountCurrency and pay.paymentDate:
+                if not getattr(pay, "exchangeRate", None) and pay.amountCurrency and pay.paymentDate:
                     pay.exchangeRate = self.exchange_rate_provider.get_exchange_rate(pay.amountCurrency, pay.paymentDate, path_prefix + ".exchangeRate")
                 if pay.exchangeRate and pay.amount:
                     pay.amount_CHF = pay.amount*pay.exchangeRate

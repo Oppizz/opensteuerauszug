@@ -1170,6 +1170,7 @@ class SecurityPayment(BaseXmlModel):
     withholding_added_original_wht_chf: Optional[Decimal] = Field(default=None, exclude=True)
     
     reportDate: Optional[date] = Field(default=None, exclude=True)
+    brokerActionId: Optional[str] = Field(default=None, exclude=True)
     remark: List[Remark] = Field(default=None, exclude=True)
     # broker amount in CHF
     amount_CHF: Optional[Decimal] = Field(default=None, exclude=True)

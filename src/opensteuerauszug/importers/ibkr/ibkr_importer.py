@@ -1000,9 +1000,9 @@ class IbkrImporter:
                                else self._get_required_field(
                                    cash_tx, 'tradeDate' if hasattr(cash_tx, 'tradeDate') else 'settleDate', 'CashTransaction'
                                ))
-                    exDate_time = getattr(cash_tx, 'exDate', None)
-                    exDate = (exDate_time.date() if hasattr(exDate_time, 'date') else exDate_time)
-                    reportDate = getattr(cash_tx, 'reportDate', None)
+                    ex_date_time = getattr(cash_tx, 'exDate', None)
+                    ex_date = (ex_date_time.date() if hasattr(ex_date_time, 'date') else ex_date_time)
+                    report_date = getattr(cash_tx, 'reportDate', None)
 
                     description = self._get_required_field(
                         cash_tx, 'description', 'CashTransaction'
@@ -1054,6 +1054,7 @@ class IbkrImporter:
                         if sec_pos_key not in security_asset_category_map:
                             security_asset_category_map[sec_pos_key] = (asset_category, sub_category)
 
+                        action_id = getattr(cash_tx, "actionID", None)
                         exch_rate = getattr(cash_tx, "fxRateToBase", None)
 
                         # Update name metadata (Priority: 0 for CashTransactions - lowest)
@@ -1074,9 +1075,10 @@ class IbkrImporter:
                             tx_type=tx_type,
                         )
 
-                        sec_payment.exDate=exDate
-                        sec_payment.reportDate=reportDate
+                        sec_payment.exDate=ex_date
+                        sec_payment.reportDate=report_date
                         sec_payment.exchangeRate=exch_rate
+                        sec_payment.brokerActionId = action_id
 
                         if tx_type in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU] and description_lower.endswith(" (return of capital)"):
                             sec_payment.sign = "(KR)"
