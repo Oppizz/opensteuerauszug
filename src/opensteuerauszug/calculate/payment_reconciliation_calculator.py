@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Dict, List, Optional
 
+from opensteuerauszug.model.critical_warning import CriticalWarningCategory
 from opensteuerauszug.model.ech0196 import (
     PaymentTypeOriginal,
     Security,
@@ -115,7 +116,47 @@ class PaymentReconciliationCalculator:
                 report.mismatch_count += 1
 
         tax_statement.payment_reconciliation_report = report
+
+        self._dismiss_reconciled_previous_year_exdate_warnings(tax_statement, report)
+
         return tax_statement
+
+    def _dismiss_reconciled_previous_year_exdate_warnings(
+        self,
+        tax_statement: TaxStatement,
+        report: PaymentReconciliationReport,
+    ) -> None:
+        """Remove PREVIOUS_YEAR_EXDATE critical warnings whose payment was successfully reconciled."""
+        prev_year_warnings = [
+            w
+            for w in tax_statement.critical_warnings
+            if w.category == CriticalWarningCategory.PREVIOUS_YEAR_EXDATE and w.payment_date
+        ]
+        if not prev_year_warnings:
+            return
+
+        matched_dates_by_identifier = defaultdict(set)
+        for row in report.rows:
+            if row.matched and row.identifier and row.payment_date and row.kursliste:
+                matched_dates_by_identifier[row.identifier].add(row.payment_date)
+
+        dismissed = []
+        for warning in prev_year_warnings:
+            if warning.identifier and warning.payment_date in matched_dates_by_identifier.get(
+                warning.identifier, set()
+            ):
+                dismissed.append(warning)
+                logger.info(
+                    "Dismissing previous-year ex-date warning for %s on %s "
+                    "(reconciliation matched)",
+                    warning.identifier,
+                    warning.payment_date,
+                )
+
+        if dismissed:
+            tax_statement.critical_warnings = [
+                w for w in tax_statement.critical_warnings if w not in dismissed
+            ]
 
     def _reconcile_security(self, security: Security) -> List[PaymentReconciliationRow]:
         broker_payments = security.broker_payments or [p for p in security.payment if not p.kursliste]
@@ -155,6 +196,7 @@ class PaymentReconciliationCalculator:
         all_dates = sorted(set(broker_by_date.keys()) | set(kurs_by_date.keys()))
         rows: List[PaymentReconciliationRow] = []
         security_label = security.securityName
+        security_identifier = str(security.isin) if security.isin else None
         country = security.country
 
         for d in all_dates:
@@ -295,29 +337,32 @@ class PaymentReconciliationCalculator:
                 status = "match"
                 matched = True
 
-            if (skip == False):
-                rows.append(
-                    PaymentReconciliationRow(
-                        country=country,
-                        security=security_label,
-                        payment_date=d,
-                        kursliste_dividend_chf=kurs.dividend_chf,
-                        kursliste_withholding_chf=kurs.original_withholding_chf or kurs.withholding_chf,
-                        kursliste_amount_currency=kurs.currency if kurs and kurs.currency else broker.dividend_currency,
-                        broker_dividend_amount=broker_dividend_amount_curr,
-                        broker_dividend_currency=broker.dividend_currency,
-                        broker_withholding_amount=broker.withholding if broker.withholding_currency else None,
-                        broker_withholding_currency=broker.withholding_currency,
-                        broker_withholding_entry_text=self._remove_symbol_prefix(broker.withholding_entry_text, security),
-                        exchange_rate=kurs.exchange_rate,
-                        accumulating=kurs.noncash,
-                        matched=matched,
-                        status=status,
-                        note=self._remove_symbol_prefix(note, security),
-                        kursliste=has_kurs and kurs.kursliste != None and kurs.kursliste,
-                        kursliste_security=security.kursliste != None and security.kursliste,
-                        kursliste_undefined=kursliste_undefined
-                    )
+            if skip:
+                continue
+
+            rows.append(
+                PaymentReconciliationRow(
+                    country=country,
+                    security=security_label,
+                    identifier=security_identifier,
+                    payment_date=d,
+                    kursliste_dividend_chf=kurs.dividend_chf,
+                    kursliste_withholding_chf=kurs.original_withholding_chf or kurs.withholding_chf,
+                    kursliste_amount_currency=kurs.currency if kurs and kurs.currency else broker.dividend_currency,
+                    broker_dividend_amount=broker_dividend_amount_curr,
+                    broker_dividend_currency=broker.dividend_currency,
+                    broker_withholding_amount=broker.withholding if broker.withholding_currency else None,
+                    broker_withholding_currency=broker.withholding_currency,
+                    broker_withholding_entry_text=self._remove_symbol_prefix(broker.withholding_entry_text, security),
+                    exchange_rate=kurs.exchange_rate,
+                    accumulating=kurs.noncash,
+                    matched=matched,
+                    status=status,
+                    note=self._remove_symbol_prefix(note, security),
+                    kursliste=has_kurs and kurs.kursliste is not None and kurs.kursliste,
+                    kursliste_security=security.kursliste is not None and security.kursliste,
+                    kursliste_undefined=kursliste_undefined
+                )
             )
 
         return rows
