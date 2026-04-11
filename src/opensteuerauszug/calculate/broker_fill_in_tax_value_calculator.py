@@ -165,6 +165,7 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                         {
                             "message": warning_msg,
                             "identifier": sec_ident,
+                            "payment_date": pay.paymentDate,
                         }
                     )
 
@@ -204,11 +205,11 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             security_type = ""
             security_group: SecurityGroupESTV = None
             if security.securityCategory == "SHARE":
-                payment_name = "Dividend"
+                payment_name = "Dividende"
                 security_type = "SHARE.NOMINAL"
                 security_group = SecurityGroupESTV.SHARE
             elif security.securityCategory == "BOND":
-                payment_name = "Distribution"
+                payment_name = "Zinszahlung"
                 security_type = "BOND.BOND"
                 security_group = SecurityGroupESTV.BOND
             else:

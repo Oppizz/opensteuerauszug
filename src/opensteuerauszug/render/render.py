@@ -289,7 +289,7 @@ def create_client_info_table(tax_statement: TaxStatement, styles, box_width: flo
         return None
 
     # Add an empty row at the end for spacing
-    table_data.append([])
+    #table_data.append([])
 
     # Create table with single column
     client_table = Table(table_data, colWidths=[box_width / 10 * 3, box_width / 10 * 7])
@@ -305,6 +305,8 @@ def create_client_info_table(tax_statement: TaxStatement, styles, box_width: flo
         ('TOPPADDING', (0, 0), (-1, -1), 1*mm),   # Reduced from 2mm
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1*mm), # Reduced from 2mm
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        # last line
+        ('BOTTOMPADDING', (0, -1), (-1, -1), 2.5*mm),
     ]))
     
     return client_table
@@ -496,10 +498,10 @@ def create_summary_table(data, styles, usable_width):
         # Row 0: A/B Headers (Indices 2 & 5 blank)
         [Paragraph(t('tax_value_ab_header').format(date=summary_data.get("period_end_date", "31.12")), header_style),
          Paragraph('', val_left),
-         Paragraph(f'<b>{t("column_a")}</b>', val_center), # 'A' in its own column (index 2)
+         Paragraph(f'<font size=10><b>{t("column_a")}</b></font>', val_center), # 'A' in its own column (index 2)
          Paragraph(t('gross_revenue_values_with_vst').format(period=summary_data.get("tax_period", "")), header_style),
          Paragraph('', val_left),
-         Paragraph(f'<b>{t("column_b")}</b>', val_center), # 'B' in its own column (index 4)
+         Paragraph(f'<font size=10><b>{t("column_b")}</b></font>', val_center), # 'B' in its own column (index 4)
          Paragraph(t('gross_revenue_values_without_vst').format(period=summary_data.get("tax_period", "")), header_style),
          Paragraph('', val_left),
          Paragraph(t('withholding_tax_claim'), header_style),
@@ -586,6 +588,13 @@ def create_summary_table(data, styles, usable_width):
     show_liabilities = liabilities_total and liabilities_total != 0
     show_liability_payments = liabilities_payments_total and liabilities_payments_total != 0
 
+    show_liabilities = True
+    show_liability_payments = True
+    if liabilities_total is None:
+        liabilities_total = Decimal(0)
+    if liabilities_payments_total is None:
+        liabilities_payments_total = Decimal(0)
+
     if show_liabilities or show_liability_payments:
         # Row 8: Liabilities Header(s)
         # Add "Schulden" header only if there are liabilities
@@ -645,21 +654,21 @@ def create_summary_table(data, styles, usable_width):
     base_col_width = usable_width / 7
     col_widths = [base_col_width, # Col 0: Steuerwert
                   10, # Col 1: Footnotes
-                  8, # Col 2: 'A' / Blank
-                  base_col_width - 8, # Col 3: Brutto mit VSt (Header only) / Blank
+                  6, # Col 2: 'A' / Blank
+                  base_col_width - 6, # Col 3: Brutto mit VSt (Header only) / Blank
                   10, # Col 4: Footnotes
-                  8, # Col 5: 'B' / Blank
-                  base_col_width -8 , # Col 6: Brutto ohne VSt / Brutto DA-1 / Total mit VSt << Needs width
+                  6, # Col 5: 'B' / Blank
+                  base_col_width - 6, # Col 6: Brutto ohne VSt / Brutto DA-1 / Total mit VSt << Needs width
                   10, # Col 7: Blank
                   base_col_width, # Col 8: Verrechnungsst / Pauschale / Total ohne VSt << Needs width
                   10, # Col 9: Blank
-                  base_col_width, # Col 10: Blank / Steuerrueckbehalt / Total Gesamt << Needs width
-                  2*base_col_width, # Col 11: Description / Istrunctions
+                  base_col_width-10, # Col 10: Blank / Steuerrueckbehalt / Total Gesamt << Needs width
+                  2*base_col_width+10, # Col 11: Description / Istrunctions
                   ]
 
-    row_heights = [15*mm, 6*mm, 2*mm, 15*mm, 6*mm, 2*mm, 20*mm, 6*mm]
+    row_heights = [15*mm, 6*mm, 2*mm, 15*mm, 6*mm, 2*mm, 16*mm, 6*mm]
     if show_liabilities or show_liability_payments:
-        row_heights.extend([15*mm, 6*mm])
+        row_heights.extend([14*mm, 6*mm])
 
     summary_table = Table(table_data, colWidths=col_widths, rowHeights=row_heights)
 
@@ -667,10 +676,12 @@ def create_summary_table(data, styles, usable_width):
 
     # --- Define common styles ---
     common_padding = [
-        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
         ('RIGHTPADDING', (0, 0), (-1, -1), 1),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        # description column
+        ('LEFTPADDING', (11, 0), (11, -1), 8),
         # footnote colunn
         ('LEFTPADDING', (1, 0), (1, -1), 1),
         ('LEFTPADDING', (7, 0), (7, -1), 1),
@@ -1681,7 +1692,7 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
                 case _:
                     if s.securityCategory is not None:
                         category = f'5_{s.securityCategory}'
-            valor = int(s.valorNumber) if s.valorNumber is not None else 0
+            valor = int(s.valorNumber) if s.valorNumber is not None else sys.maxsize
             name = s.securityName if s.securityName is not None else ''
             return country + (category, valor, name)
 
@@ -1730,20 +1741,20 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
             precision = find_minimal_decimals(security.nominalValue)
             if getattr(security, 'payment', None):
                 for payment in security.payment:
-                    entries.append(('payment', payment.exDate or payment.paymentDate, payment))
+                    entries.append(('payment', payment.paymentDate or payment.exDate, 1, payment))
                     precision = max(precision, find_minimal_decimals(payment.quantity))
             if getattr(security, 'stock', None):
                 for stock in security.stock:
-                    entries.append(('stock', stock.referenceDate, stock))
+                    entries.append(('stock', stock.referenceDate, 1 if stock.corpAction else 2, stock))
                     precision = max(precision, find_minimal_decimals(stock.quantity))
             if precision > 0:
                 stock_quantity_template = Decimal('0.' + '0' * precision)
             else:
                 stock_quantity_template = Decimal('0')
-            entries.sort(key=lambda x: x[1] or '')
+            entries.sort(key=lambda x: (x[1] or '', x[2] or 1))
 
             # Render each entry
-            for entry_type, entry_date, entry in entries:
+            for entry_type, entry_date, sort_key2, entry in entries:
                 if entry_type == 'payment':
                     name = entry.name or ''
                     if entry.sign:
@@ -1769,6 +1780,8 @@ def create_securities_table(tax_statement, styles, usable_width, security_type: 
                         raise NotImplementedError("Cannot render stock type")
                     if entry.mutation:
                         name = entry.name
+                        if entry.corpAction:
+                            name = t('corp_action')
                     else:
                         name = t('balance')
                     table_data.append([
@@ -2630,7 +2643,7 @@ def render_tax_statement(
         if summary_table_data:
             story.append(summary_table_data)
 
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 1.0*cm))
 
         # Info boxes below the summary table
         story.append(create_dual_info_boxes(styles, usable_width, mixed=mixed_source))

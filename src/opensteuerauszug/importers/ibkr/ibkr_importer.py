@@ -626,6 +626,8 @@ class IbkrImporter:
                     # 'BUY' or 'SELL'
                     buy_sell = self._get_required_field(trade, 'buySell', 'Trade')
 
+                    transaction_type = getattr(trade, 'transactionType', None)
+
                     ib_commission = self._to_decimal(
                         trade.ibCommission if trade.ibCommission is not None else '0',
                         'ibCommission', f"Trade {symbol}"
@@ -678,10 +680,11 @@ class IbkrImporter:
                         mutation=True,
                         quantity=quantity,
                         unitPrice=trade_price if trade_price != Decimal(0) or asset_category in ["OPT", "FOP"] else None,
-                        name=buy_sell.value,
+                        name="Kauf" if buy_sell.value == "BUY" else ("Verkauf" if buy_sell.value == "SELL" else buy_sell.value),
                         orderId=trade.ibOrderID,
                         balanceCurrency=currency,
-                        quotationType="PIECE"
+                        quotationType="PIECE",
+                        fractional=True if transaction_type and transaction_type.upper() == "FRACSHARE" else None,
                     )
                     processed_security_positions[sec_pos]['stocks'].append(
                         stock_mutation
@@ -975,6 +978,12 @@ class IbkrImporter:
                         corpAction=True
                     )
 
+                    if quantity > Decimal("0"):
+                        for s in processed_security_positions[sec_pos]['stocks']:
+                            if s.mutation and s.fractional and s.quantity < Decimal("0") and s.settleDate and s.settleDate == action_date and s.referenceDate != action_date:
+                                # we assume that fractiona share got sold because of corp action and want the date to be the same for both entries.
+                                s.referenceDate = action_date
+
                     processed_security_positions[sec_pos]["stocks"].append(
                         stock_mutation
                     )
@@ -1098,6 +1107,7 @@ class IbkrImporter:
                             # Interst paid due to negative balance: description starting with "<CURRENCY> DEBIT INT FOR"
                             if description.startswith(f"{currency} DEBIT INT FOR"):
                                 # Tax relevant event. Fall through to create a bank payment.
+                                description = "Sollzinsen"
                                 pass
                             else:
                                 # TODO: CREDIT INT is charged on positive balance and would belong to fees (not liabilities).
@@ -1113,6 +1123,10 @@ class IbkrImporter:
                             continue
                         elif tx_type in [ibflex.CashAction.BROKERINTRCVD]:
                             # Tax relevant event. Fall through to create a bank payment.
+                            if "(SYEP)" in description:
+                                description = "Habenzinsen aus Aktienverleih (SYEP)"
+                            else:
+                                description = "Habenzinsen"
                             pass
                         elif tx_type in [ibflex.CashAction.WHTAX]:
                             # Withholding tax not linked to a security (e.g. yield enhancement).
@@ -1151,7 +1165,7 @@ class IbkrImporter:
                         raise ValueError(f"Code is missing or worng format for {description}")
                     
                     if security_id and tx_code[0] in [ibflex.Code.REVERSE]:
-                        exDate = self._get_required_field(
+                        ex_date = self._get_required_field(
                             div_acc, 'exDate', 'ChangeInDividendAccruals'
                         )
                         pay_date = self._get_required_field(
@@ -1167,7 +1181,7 @@ class IbkrImporter:
                             if payments and len(payments)>0:
                                 div_payments = (p for p in payments if p.broker_label_original in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU, ibflex.CashAction.WHTAX] and (not hasattr(p, 'exDate') or p.exDate == None) and p.paymentDate == pay_date)
                                 for p in div_payments:
-                                    p.exDate = exDate
+                                    p.exDate = ex_date
                 
         # --- Process Corrections Flex Files ---
         # Import withholding-tax corrections from a post-year-end flex export.
@@ -1518,7 +1532,7 @@ class IbkrImporter:
                 )
 
             bank_account_num_str = f"{acc_id}-{curr}"
-            bank_account_name_str = f"{acc_id} {curr} position"
+            bank_account_name_str = f"{acc_id} {curr} Guthaben"
 
             # Look up dates for this specific account
             dates_for_account = account_dates.get(acc_id, {})

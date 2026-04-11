@@ -1206,6 +1206,7 @@ class SecurityStock(BaseXmlModel):
     corpAction: Optional[bool] = Field(default=None, exclude=True)
     corpActionPeerIsin: Optional[ISINType] = Field(default=None, exclude=True)
     settleDate: Optional[date] = Field(default=None, exclude=True)
+    fractional: Optional[bool] = Field(default=None, exclude=True)
 
     model_config = {
         "json_schema_extra": {'tag_name': 'stock', 'tag_namespace': NS_MAP['eCH-0196']},

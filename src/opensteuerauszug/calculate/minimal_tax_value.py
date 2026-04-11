@@ -13,6 +13,7 @@ from ..model.ech0196 import (
     PaymentTypeOriginal,
 )
 from ..core.exchange_rate_provider import ExchangeRateProvider
+from ..render.translations.manager import DEFAULT_LANGUAGE
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from ..core.constants import WITHHOLDING_TAX_RATE
@@ -50,6 +51,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
         self._current_account_is_type_A = None
         self._current_security_is_type_A = None
         self._current_security_country = None
+        self.language=DEFAULT_LANGUAGE
         self.logger = logging.getLogger(__name__)
         self.logger.info(
             "MinimalTaxValueCalculator initialized with mode: %s and provider: %s",
@@ -251,7 +253,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                     do_add = False
                     keeping_info: str = None
                     removal_warning: str = None
-                    if sec.stock and any(s.mutation == False for s in sec.stock) and any(s.mutation for s in sec.stock):
+                    if sec.stock and any(not s.mutation for s in sec.stock) and any(s.mutation for s in sec.stock):
                         do_add = True
                         keeping_info = None
                     elif sec.taxValue:
@@ -265,7 +267,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                             else:
                                 removal_warning = f"  - Removing {ident} with taxable value = 0 and no payments"
 
-                    if do_add == False:
+                    if do_add is False:
                         if sec.payment:
                             if any(p.grossRevenueA or p.grossRevenueB or p.withHoldingTaxClaim or p.additionalWithHoldingTaxUSA or p.lumpSumTaxCredit or p.payment_type_original != PaymentTypeOriginal.FUND_ACCUMULATION for p in sec.payment):
                                 do_add = True
@@ -282,6 +284,10 @@ class MinimalTaxValueCalculator(BaseCalculator):
                         elif self.reconciliation_active and sec.get_payment_and_broker_nontaxable():
                             do_add = True
                             keeping_info = f"  - Keeping {ident} with zero taxable payments for for reconciliation (capital gains check list)"
+
+                    if do_add is False and sec.stock and sum(s.quantity for s in sec.stock if s.quantity and s.mutation and s.corpAction) != Decimal(0):
+                        do_add = True
+                        keeping_info = None
 
                     if do_add:
                         d.security.append(sec)

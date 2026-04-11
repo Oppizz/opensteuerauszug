@@ -668,6 +668,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 # Skip payment generation if the quantity of outstanding securities is zero
                 continue
 
+            payment_name_broker: Optional[str] = None
             if pay.taxEvent:
                 legends = getattr(pay, "legend", [])
                 split_legend = next(
@@ -703,13 +704,50 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     ):
                         continue
 
-                if pay.paymentType == PaymentTypeESTV.OTHER_BENEFIT and pay.variant and pay.paymentValueCHF not in (None, Decimal("0")):
-                    legends = getattr(pay, "legend", [])
-                    if any(legend for legend in legends if hasattr(legend, "text") and any(t for t in legend.text if "wahlweise" in t.value.lower() and "dividende in aktien" in t.value.lower())):
-                        logger.warning(
-                            f"Payment has multiple options, skipping option {pay.variant} {pay.paymentValueCHF} for {security.isin or security.securityName} on {pay.paymentDate}."
-                        )
-                        continue
+                if pay.paymentType == PaymentTypeESTV.OTHER_BENEFIT:
+                    if pay.variant and pay.paymentValueCHF not in (None, Decimal("0")):
+                        keep: Optional[bool] = None
+                        if security.broker_payments:
+                            for broker_pay in security.broker_payments:
+                                if broker_pay.paymentDate == pay.paymentDate and broker_pay.amount > Decimal("0"):
+                                    chf_amount, _ = self._convert_to_chf(
+                                        broker_pay.amount,
+                                        broker_pay.amountCurrency,
+                                        f"{path_prefix}.exchangeRate",
+                                        broker_pay.paymentDate
+                                    )
+                                    keep = abs(chf_amount - pay.paymentValueCHF * quantity) <= Decimal("0.01")
+                                    if keep:
+                                        payment_name_broker = "Dividende"
+                                    break
+                        #legends = getattr(pay, "legend", [])
+                        if keep is None: #and any(legend for legend in legends if hasattr(legend, "text") and any(t for t in legend.text if "wahlweise" in t.value.lower() and "dividende in aktien" in t.value.lower()))
+                            # keep the lowest payment if multiple options are given without broker payment to match against, as typically only one of them is correct and without broker payment it could be a stock issue which usually has lower taxable value than full dividend.
+                            keep = not any(p for p in payments if p != pay and p.taxEvent and p.paymentDate == pay.paymentDate and p.paymentType == PaymentTypeESTV.OTHER_BENEFIT and p.variant != pay.variant and p.paymentValueCHF not in (None, Decimal("0")) and p.paymentValueCHF < pay.paymentValueCHF)
+                        if keep is False:
+                            logger.warning(
+                                f"Payment has multiple options, skipping option {pay.variant} (CHF {pay.paymentValueCHF}) for {security.isin or security.securityName} on {pay.paymentDate}."
+                            )
+                            continue
+                    else:
+                        if security.stock:
+                            for s in security.stock:
+                                if s.mutation and s.corpAction and s.referenceDate in [pay.exDate, pay.paymentDate] and s.quantity > Decimal("0"):
+                                    payment_name_broker = "Aktiendividende"
+                                    if split_legend and split_legend.text:
+                                        legend_txt = next((t for t in split_legend.text if t.value and t.lang and t.lang.lower() == self.language.lower()), None) or split_legend.text[0]
+                                        if legend_txt and legend_txt.value:
+                                            payment_name_broker += f" ({legend_txt.value})"
+                                    break
+                        if payment_name_broker is None and legends and pay.paymentValueCHF in (None, Decimal("0")):
+                            if any((legend for legend in legends if legend.nominalValueOld is not None and legend.nominalValueNew is None)):
+                                payment_name_broker = "Nennwertreduktion"
+                            else:
+                                legend = next((legend for legend in legends if legend.nominalValueOld is None and legend.nominalValueNew is None), None)
+                                if legend and legend.text:
+                                    legend_txt = next((t for t in legend.text if t.value and t.lang and t.lang.lower() == self.language.lower()), None) or legend.text[0]
+                                    if legend_txt and legend_txt.value and legend_txt.value.lower().startswith("nennwertreduktion"):
+                                        payment_name_broker = "Nennwertreduktion"
 
             # Validate sign type if present
             current_sign = pay.sign if hasattr(pay, "sign") else None
@@ -733,17 +771,17 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             payment_name = f"KL:{security.securityName}"
             if pay.paymentType is None or pay.paymentType == PaymentTypeESTV.STANDARD:
                 if kl_sec.securityGroup == "SHARE":
-                    payment_name = "Dividend"
+                    payment_name = "Dividende"
                 else:
-                    payment_name = "Distribution"
+                    payment_name = "Zinszahlung"
             elif pay.paymentType == PaymentTypeESTV.GRATIS:
-                payment_name = "Stock Dividend"
+                payment_name = "Aktiendividende (ohne steuerl. Wert)"
             elif pay.paymentType == PaymentTypeESTV.OTHER_BENEFIT:
-                payment_name = "Other Monetary Benefits"
+                payment_name = payment_name_broker or ("Andere (ohne steuerl. Wert)" if pay.paymentValueCHF in (None, Decimal("0")) else "Andere")
             elif pay.paymentType == PaymentTypeESTV.AGIO:
                 payment_name = "Premium/Agio"
             elif pay.paymentType == PaymentTypeESTV.FUND_ACCUMULATION:
-                payment_name = "Taxable Income from Accumulating Fund"
+                payment_name = "Thesaurierung"
 
             # Preserve the original payment subtype only when it is explicitly non-standard.
             # Standard is the default and should remain unset so VERIFY mode does not fail
