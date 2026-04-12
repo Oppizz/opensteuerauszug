@@ -286,7 +286,8 @@ class WithholdingCapCalculator:
     ) -> None:
         """Move all gross revenue to the A column."""
         # With withholding any revenue is type A
-        if kl_payment.grossRevenueB and kl_payment.grossRevenueB > Decimal("0"):
+        is_type_a = broker_currency and broker_currency == "CHF"
+        if is_type_a and kl_payment.grossRevenueB and kl_payment.grossRevenueB > Decimal("0"):
             assert kl_payment.grossRevenueA is None or kl_payment.grossRevenueA == Decimal("0")
             kl_payment.grossRevenueA = kl_payment.grossRevenueB
             kl_payment.grossRevenueB = Decimal("0.00")
@@ -296,7 +297,7 @@ class WithholdingCapCalculator:
         kl_payment.withholding_added_original_wht_chf = Decimal("0")
 
         # Set the WHT fields.
-        if broker_currency and broker_currency == "CHF":
+        if is_type_a:
             kl_payment.withHoldingTaxClaim = broker_wht_chf
         else:
             kl_payment.nonRecoverableTaxAmount = broker_wht_chf
