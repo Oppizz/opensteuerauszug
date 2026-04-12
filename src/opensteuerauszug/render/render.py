@@ -4,50 +4,36 @@ import io
 from math import floor
 import sys
 import hashlib
-import os
-import json
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Optional, Union, List
 from decimal import Decimal, ROUND_HALF_UP
 import zlib
 from PIL import Image as PILImage
 import html
 
-# --- ReportLab Imports ---
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, 
-    PageBreak, KeepTogether, Frame, PageTemplate, FrameActionFlowable,
+    Paragraph, Spacer, Image, Table, TableStyle,
+    PageBreak, KeepTogether, Frame, PageTemplate,
     BaseDocTemplate, DocAssign
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.units import cm, mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 import logging
 
-# --- Import TaxStatement model ---
-from opensteuerauszug.model.ech0196 import Depot, SecurityCategory, SecurityPayment, TaxStatement, Security, CountryIdISO2Type
-from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
+from opensteuerauszug.model.ech0196 import TaxStatement, SecurityPayment, Security, CountryIdISO2Type
+from .onedee import OneDeeBarCode
 from ..model.payment_reconciliation import PaymentReconciliationRow, TaxValueReconciliationRow
-
 from ..core.constants import NON_TAXABLE_SIGNS
-
-# --- Import OneDeeBarCode for barcode rendering ---
-from opensteuerauszug.render.onedee import OneDeeBarCode
-
-# --- Import Organisation helper functions ---
 from opensteuerauszug.core.organisation import compute_org_nr
-
-# --- Import Security type utilities ---
 from opensteuerauszug.core.security import determine_security_type, SecurityType
-
-# --- Import styles utility ---
 from opensteuerauszug.util.styles import get_custom_styles, FONT_REGULAR, FONT_BOLD
 from opensteuerauszug.util import round_accounting
-from opensteuerauszug.render.markdown_renderer import markdown_to_platypus
-from opensteuerauszug.render.translations import t as _t, DEFAULT_LANGUAGE
+from .markdown_renderer import markdown_to_platypus
+from .translations import t as _t, DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -915,6 +901,7 @@ def create_liabilities_table(tax_statement, styles, usable_width):
     ])
 
     col_widths = [24*mm, 110*mm, 19*mm, 28*mm, 18*mm, 28*mm, 5*mm, 8, 23*mm]
+    assert sum(col_widths) < usable_width
     liabilities_table = Table(table_data, colWidths=col_widths)
 
     table_style = [
@@ -1571,7 +1558,8 @@ def create_bank_accounts_table(tax_statement, styles, usable_width):
     ])
 
     # Column widths (adjust as needed for layout)
-    col_widths = [24*mm, 80*mm, 18*mm, 28*mm, 18*mm, 28*mm, 5*mm, 8, 23*mm, 5*mm,  8 , 23*mm]
+    col_widths = [24*mm, 94*mm, 16*mm, 20*mm, 18*mm, 24*mm, 5*mm, 8, 23*mm, 5*mm,  8 , 23*mm]
+    assert sum(col_widths) < usable_width
     bank_table = Table(table_data, colWidths=col_widths)
     # --- Table style for header and intermediate totals ---
     table_style = [

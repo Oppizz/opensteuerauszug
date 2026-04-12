@@ -1,23 +1,23 @@
 from .base import BaseCalculator, CalculationMode, CalculationError
-from ..model.ech0196 import (
-    SecurityStock,
+from opensteuerauszug.model.ech0196 import (
     TaxStatement,
-    BankAccount,  # Added BankAccount
+    BankAccount,
     BankAccountTaxValue,
     BankAccountPayment,
     LiabilityAccountTaxValue,
     LiabilityAccountPayment,
-    Security,  # Added Security
+    Security,
     SecurityTaxValue,
-    SecurityPayment,  # Added SecurityPayment
+    SecurityPayment,
+    SecurityStock,
     PaymentTypeOriginal,
 )
-from ..core.exchange_rate_provider import ExchangeRateProvider
-from ..render.translations.manager import DEFAULT_LANGUAGE
+from opensteuerauszug.core.exchange_rate_provider import ExchangeRateProvider
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
-from ..core.constants import WITHHOLDING_TAX_RATE
-from typing import Dict, Tuple, Optional, List
+from opensteuerauszug.core.constants import WITHHOLDING_TAX_RATE
+from ..render.translations.manager import DEFAULT_LANGUAGE
+from typing import Tuple, Optional, List, Dict
 from datetime import date, timedelta
 import logging
 
