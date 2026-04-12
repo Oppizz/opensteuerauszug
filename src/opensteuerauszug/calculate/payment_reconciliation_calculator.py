@@ -245,8 +245,8 @@ class PaymentReconciliationCalculator:
                 if has_broker and broker.wth_correction_late_date is not None:
                     note += f" Late correction on {broker.wth_correction_late_date}."
             elif has_broker and kurs.has_added_withholding:
-                status = "capped"
-                matched = True
+                status = "expected" if security.kursliste else "capped"
+                matched = False
                 original_wht = kurs.original_withholding_chf
                 note = (
                     f"Withholding adjusted to broker level ("
@@ -254,6 +254,8 @@ class PaymentReconciliationCalculator:
                     if kurs.withholding_chf is not None
                     else "Withholding adjusted to broker level."
                 )
+                if has_kurs and security.kursliste:
+                    note += " Check in tax software"
             elif has_kurs and not has_broker and kurs.noncash:
                 status = "expected"
                 if kurs.dividend_chf or kurs.withholding_chf:
@@ -309,10 +311,17 @@ class PaymentReconciliationCalculator:
                             note = "Broker wth is below Kursliste value."
                 matched = div_ok and w_ok
                 status = "match" if matched else "mismatch"
-            elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
-                skip = True
+            #elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
+            #    skip = True
             elif not has_kurs and has_broker:
                 note = "Broker paym has no Kursliste entry."
+                if broker.allows_broker_above_kursliste:
+                    status = "match"
+                    matched = True
+                    if security.kursliste:
+                        note = "Tax free paym."
+                    else:
+                        note = None
             elif has_kurs and not has_broker:
                 if kurs.dividend_chf in (None, Decimal("0")):
                     payment_undef = next((p for p in kursliste_payments if p.paymentDate == d and (p.undefined or p.payment_type_original == PaymentTypeOriginal.FUND_ACCUMULATION)), None)

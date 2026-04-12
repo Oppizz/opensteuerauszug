@@ -2364,14 +2364,14 @@ def create_payment_reconciliation_tables(tax_statement: TaxStatement, styles, us
             if row.broker_withholding_amount is not None:
                 broker_wht = f"{format_currency(row.broker_withholding_amount, '', True)} {row.broker_withholding_currency or ''}".strip()
                 broker_wht_markup = escape_html_for_paragraph(broker_wht)
-                if row.broker_withholding_entry_text:
+                if row.broker_withholding_entry_text and row.status != 'match':
                     broker_wht_text = escape_html_for_paragraph(row.broker_withholding_entry_text).replace("\n", "<br/>")
                     broker_wht_markup = f"{broker_wht_markup}<br/><font size=7>{broker_wht_text}</font>"
                 broker_wht_paragraph = Paragraph(broker_wht_markup, val_right)
 
             #status_mark = '✓?' if row.status in ('match', 'expected') and row.kursliste == False else ('✓' if row.status in ('match', 'expected') else '✗')
             status_mark = '✓' if row.status in ('match', 'expected', 'capped') else '✗'
-            if row.status != 'match' and row.note:
+            if row.note:
                 row_note = f"<font size=7>{escape_html_for_paragraph(row.note)}</font>"
                 if row.status == 'expected':
                     if row.kursliste_undefined:
