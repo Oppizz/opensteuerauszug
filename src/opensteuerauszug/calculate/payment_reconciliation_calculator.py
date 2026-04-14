@@ -173,7 +173,7 @@ class PaymentReconciliationCalculator:
 
         for payment in broker_payments:
             key_date = payment.paymentDate
-            if has_kursliste and (payment.amount or payment.withHoldingTaxClaim or payment.nonRecoverableTaxAmountOriginal) and payment.reportDate and payment.reportDate.year == payment.paymentDate.year and ((payment.paymentDate < payment.reportDate and security.securityCategory == "BOND") or security.securityCategory == "SHARE"):
+            if has_kursliste and (payment.amount or payment.withHoldingTaxClaim or payment.nonRecoverableTaxAmountOriginal) and payment.reportDate and payment.reportDate.year == payment.paymentDate.year and ((payment.paymentDate < payment.reportDate and security.securityCategory == "BOND") or security.securityCategory in ["SHARE", "FUND"]):
                 if any(p for p in kursliste_payments_amount if p.paymentDate == payment.paymentDate) == False:
                     if any(p for p in kursliste_payments_amount if p.paymentDate == payment.reportDate):
                         key_date = payment.reportDate

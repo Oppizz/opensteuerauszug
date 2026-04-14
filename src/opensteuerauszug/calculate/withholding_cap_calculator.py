@@ -250,7 +250,7 @@ class WithholdingCapCalculator:
         if kl_payment.grossRevenueA and kl_payment.grossRevenueA > Decimal("0"):
             assert kl_payment.grossRevenueB is None or kl_payment.grossRevenueB == Decimal("0")
             kl_payment.grossRevenueB = kl_payment.grossRevenueA
-            kl_payment.grossRevenueA = Decimal("0.00")
+            kl_payment.grossRevenueA = None #Decimal("0.00")
 
         # Store original values for reconciliation reporting.
         kl_payment.withholding_capped = True
@@ -290,7 +290,7 @@ class WithholdingCapCalculator:
         if is_type_a and kl_payment.grossRevenueB and kl_payment.grossRevenueB > Decimal("0"):
             assert kl_payment.grossRevenueA is None or kl_payment.grossRevenueA == Decimal("0")
             kl_payment.grossRevenueA = kl_payment.grossRevenueB
-            kl_payment.grossRevenueB = Decimal("0.00")
+            kl_payment.grossRevenueB = None #Decimal("0.00")
 
         # Store original values for reconciliation reporting.
         kl_payment.withholding_added = True

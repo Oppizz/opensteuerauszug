@@ -115,7 +115,7 @@ class IbkrImporter:
             subCat = subCat.upper()
         country = self._normalize_country_code(getattr(data_object, "issuerCountryCode", None))
         quantity_converted = quantity
-        if assetCat == "BOND" and subCat and subCat == "CORP" and country and country == "US" and quantity % 1000 == 0:
+        if assetCat == "BOND" and subCat and subCat == "CORP" and country and country in ["US", "CA"] and quantity % 1000 == 0:
             quantity_converted = quantity / 1000
 
         return quantity_converted
@@ -1299,7 +1299,7 @@ class IbkrImporter:
                         quotationType=primary_quotation_type,
                         quantity=opening_balance,
                         balanceCurrency=primary_currency,
-                        name="Opening balance"
+                        name="Anfangssaldo"
                     )
                 )
 
@@ -1316,7 +1316,7 @@ class IbkrImporter:
                         quantity=closing_balance,
                         balance=closing_value,
                         balanceCurrency=primary_currency,
-                        name="Closing balance"
+                        name="Endsaldo"
                     )
                 )
 

@@ -68,7 +68,7 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             return
         
         value_to_convert = sec_tax_value.balance
-        if value_to_convert is not None and sec_tax_value.unitPrice is None:
+        if value_to_convert is not None:# and sec_tax_value.unitPrice is None:
             price = value_to_convert / sec_tax_value.quantity if sec_tax_value.quantity and sec_tax_value.quantity != 0 else None
             self._set_field_value(sec_tax_value, "unitPrice", price, path_prefix)
 
@@ -202,17 +202,24 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                 continue
 
             payment_name = f"KL:{security.securityName}"
-            security_type = ""
-            security_group: SecurityGroupESTV = None
+            security_type = security.securityType
+            security_group: SecurityGroupESTV = SecurityGroupESTV(security.securityCategory) if security.securityCategory else None
             if security.securityCategory == "SHARE":
                 payment_name = "Dividende"
-                security_type = "SHARE.NOMINAL"
-                security_group = SecurityGroupESTV.SHARE
+                if security_type is None:
+                    security_type = "SHARE.NOMINAL"
+                #security_group = SecurityGroupESTV.SHARE
+            elif security.securityCategory == "FUND":
+                payment_name = "Dividende"
+                if security_type is None:
+                    security_type = "FUND.ACCUMULATION"
+                #security_group = SecurityGroupESTV.SHARE
             elif security.securityCategory == "BOND":
                 payment_name = "Zinszahlung"
-                security_type = "BOND.BOND"
-                security_group = SecurityGroupESTV.BOND
-            else:
+                if security_type is None:
+                    security_type = "BOND.BOND"
+                #security_group = SecurityGroupESTV.BOND
+            elif security.securityCategory is None or security_type is None:
                 raise ValueError(f"Security Category not supported {security.securityCategory} ({security.securityName})")
 
             # Preserve the original payment subtype only when it is explicitly non-standard.
@@ -299,14 +306,14 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             # possibly with zero values, even though our reading of the spec suggests they should be mutually exclusive
             if pay.withHoldingTaxClaim is not None:
                 sec_payment.grossRevenueA = chf_amount
-                sec_payment.grossRevenueB = Decimal("0")
+                sec_payment.grossRevenueB = None #Decimal("0")
                 sec_payment.withHoldingTaxClaim = (chf_amount * WITHHOLDING_TAX_RATE).quantize(
                     Decimal("0.01")
                 )
             else:
-                sec_payment.grossRevenueA = Decimal("0")
+                sec_payment.grossRevenueA = None #Decimal("0")
                 sec_payment.grossRevenueB = chf_amount
-                sec_payment.withHoldingTaxClaim = Decimal("0")
+                sec_payment.withHoldingTaxClaim = None #Decimal("0")
 
             da1_security_group = security_group
             da1_security_type = security_type

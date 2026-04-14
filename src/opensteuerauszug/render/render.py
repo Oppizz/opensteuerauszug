@@ -1737,7 +1737,7 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                 case "SHARE":
                     category = '1_SHARE'
                 case "FUND":
-                    category = '2_FUND'
+                    category = '1_SHARE'
                 case "BOND":
                     category = '3_BOND'
                 case "OPTION":
@@ -2053,9 +2053,12 @@ def create_currency_summary_table(tax_statement: TaxStatement, styles, usable_wi
         currency_map: defaultdict[str, defaultdict[str, Security]] = defaultdict(lambda: defaultdict(lambda: []))
         for security in depot.security:
             currency = None
+            sec_cat = security.securityCategory or '?'
+            if sec_cat == "FUND":
+                sec_cat = 'SHARE'
             if security.taxValue:
                 currency = security.taxValue.balanceCurrencyBroker or security.taxValue.balanceCurrency or security.currency or '?'
-                currency_map[currency][security.securityCategory or '?'].append(security)
+                currency_map[currency][sec_cat].append(security)
             payment_list = security.get_payment_and_broker_nontaxable()
             if payment_list and len(payment_list) > 0:
                 prev_currency = None
@@ -2064,7 +2067,7 @@ def create_currency_summary_table(tax_statement: TaxStatement, styles, usable_wi
                         payment.grossRevenueA or payment.grossRevenueB or payment.withHoldingTaxClaim or payment.nonRecoverableTaxAmount
                     ):
                         if prev_currency != payment.amountCurrency:
-                            currency_map[payment.amountCurrency][security.securityCategory or '?'].append(security)
+                            currency_map[payment.amountCurrency][sec_cat].append(security)
                             prev_currency = payment.amountCurrency
 
 

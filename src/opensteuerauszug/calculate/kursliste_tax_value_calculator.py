@@ -1,13 +1,13 @@
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional, List, Set
+from typing import Optional, List, Set, get_args
 import logging
 
 from opensteuerauszug.core.exchange_rate_provider import ExchangeRateProvider
 from opensteuerauszug.core.kursliste_exchange_rate_provider import KurslisteExchangeRateProvider
 from opensteuerauszug.core.kursliste_manager import KurslisteManager
 from opensteuerauszug.core.flag_override_provider import FlagOverrideProvider
-from opensteuerauszug.model.ech0196 import Security, SecurityTaxValue, SecurityPayment, SecurityStock, PaymentTypeOriginal, ISINType
+from opensteuerauszug.model.ech0196 import Security, SecurityTaxValue, SecurityPayment, SecurityStock, PaymentTypeOriginal, ISINType, SecurityType, SecurityCategory
 from opensteuerauszug.model.kursliste import PaymentTypeESTV, SecurityGroupESTV, Da1Rate, PaymentBond, Security as KurslisteSecurity
 from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWarningCategory
 from opensteuerauszug.core.position_reconciler import PositionReconciler
@@ -117,6 +117,15 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             for depot in tax_statement.listOfSecurities.depot:
                 self._all_securities.extend(depot.security)
         result = super().calculate(tax_statement)
+
+        """
+        if tax_statement.listOfSecurities:
+            for depot in tax_statement.listOfSecurities.depot:
+                for security in depot.security:
+                    # update security currency if there's a tax value, otherwise tax software shows wrong values
+                    if security.taxValue and security.taxValue.balanceCurrency and security.taxValue.balanceCurrency != security.currency:
+                        self._set_field_value(security, "currency", security.taxValue.balanceCurrency, "")
+        """
         if self._missing_kursliste_entries:
             logger.warning("Missing Kursliste entries for securities:")
             for entry in self._missing_kursliste_entries:
@@ -182,7 +191,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             super()._handle_Security(security, path_prefix)
             return
 
-        kl_sec = None
+        kl_sec: KurslisteSecurity = None
         if security.valorNumber:
             kl_sec = accessor.get_security_by_valor(int(security.valorNumber))
         if not kl_sec and security.isin:
@@ -203,6 +212,17 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 self._set_field_value(security, "valorNumber", valor_int, path_prefix)
 
             self._set_field_value(security, "kursliste", True, path_prefix)
+            
+            if security.securityType is None and kl_sec.securityType and kl_sec.securityType in get_args(SecurityType):
+                self._set_field_value(security, "securityType", kl_sec.securityType.value, path_prefix)
+            if kl_sec.securityGroup and kl_sec.securityGroup in get_args(SecurityCategory):
+                self._set_field_value(security, "securityCategory", kl_sec.securityGroup.value, path_prefix)
+            if getattr(kl_sec, "issueDate", None) is not None:
+                security.issueDate = kl_sec.issueDate
+            if getattr(kl_sec, "redemptionDate", None) is not None:
+                security.redemptionDate = kl_sec.redemptionDate
+            if getattr(kl_sec, "interestRate", None) is not None:
+                security.interestRate = kl_sec.interestRate
         else:
             '''
             ident = (
@@ -251,16 +271,6 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                     price_date=ref_date,
                 )
                 if price is not None:
-                    self._set_field_value(sec_tax_value, "unitPrice", price, path_prefix)
-                    value = price * sec_tax_value.quantity
-                    self._set_field_value(sec_tax_value, "value", value, path_prefix)
-                    # The Kursliste price is in CHF, so if balance was previously set
-                    # (e.g. from the broker's position value), it must be updated to the CHF value.
-                    #self._set_field_value(sec_tax_value, "balance", value, path_prefix)
-                    self._set_field_value(sec_tax_value, "exchangeRate", Decimal("1"), path_prefix)
-                    self._set_field_value(sec_tax_value, "balanceCurrency", "CHF", path_prefix)
-                    self._set_field_value(sec_tax_value, "kursliste", True, path_prefix)
-
                     balanceCurrencyBroker = getattr(sec_tax_value, "balanceCurrencyBroker", None)
                     if balanceCurrencyBroker and sec_tax_value.balance:
                         chf_value, rate = self._convert_to_chf(
@@ -271,6 +281,16 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                         )
                         self._set_field_value(sec_tax_value, "balance_CHF", chf_value, path_prefix)
                         self._set_field_value(sec_tax_value, "exchangeRateKursliste", rate, path_prefix)
+
+                    self._set_field_value(sec_tax_value, "unitPrice", price, path_prefix)
+                    value = price * sec_tax_value.quantity
+                    self._set_field_value(sec_tax_value, "value", value, path_prefix)
+                    # The Kursliste price is in CHF, so if balance was previously set
+                    # (e.g. from the broker's position value), it must be updated to the CHF value.
+                    self._set_field_value(sec_tax_value, "balance", value, path_prefix)
+                    self._set_field_value(sec_tax_value, "exchangeRate", Decimal("1"), path_prefix)
+                    self._set_field_value(sec_tax_value, "balanceCurrency", "CHF", path_prefix)
+                    self._set_field_value(sec_tax_value, "kursliste", True, path_prefix)
                     return
         elif self._current_security_is_zero_balance_option:
             # The option position was fully closed before year-end: value is definitively 0.
@@ -770,7 +790,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
             payment_name = f"KL:{security.securityName}"
             if pay.paymentType is None or pay.paymentType == PaymentTypeESTV.STANDARD:
-                if kl_sec.securityGroup == "SHARE":
+                if kl_sec.securityGroup == "SHARE" or kl_sec.securityGroup == "FUND":
                     payment_name = "Dividende"
                 else:
                     payment_name = "Zinszahlung"
@@ -872,14 +892,14 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             # Only STANDARD payment types get DA-1 reclaim calculation.
             if pay.withHoldingTax:
                 sec_payment.grossRevenueA = chf_amount
-                sec_payment.grossRevenueB = Decimal("0")
+                sec_payment.grossRevenueB = None #Decimal("0")
                 sec_payment.withHoldingTaxClaim = (chf_amount * WITHHOLDING_TAX_RATE).quantize(
                     Decimal("0.01")
                 )
             else:
-                sec_payment.grossRevenueA = Decimal("0")
+                sec_payment.grossRevenueA = None #Decimal("0")
                 sec_payment.grossRevenueB = chf_amount
-                sec_payment.withHoldingTaxClaim = Decimal("0")
+                sec_payment.withHoldingTaxClaim = None #Decimal("0")
 
             # DA-1 reclaim is only computed for STANDARD payment types
             if pay.paymentType is None or pay.paymentType == PaymentTypeESTV.STANDARD:
