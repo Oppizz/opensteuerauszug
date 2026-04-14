@@ -775,8 +775,8 @@ class IbkrImporter:
                     if getattr(open_pos, 'positionValue', None) is not None:
                         pos_value = self._to_decimal(open_pos.positionValue, 'positionValue', f"OpenPosition {symbol}")
 
-                    if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country == "US":
-                        # For US corporate bonds, price is a percentage of nominal value, so we need to adjust the mark price accordingly
+                    if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country in ["US", "CA"]:
+                        # For US and CA (and others?) corporate bonds, price is a percentage of nominal value, so we need to adjust the mark price accordingly
                         mark_price = pos_value / quantity
 
                     balance_stock = SecurityStock(
