@@ -80,9 +80,10 @@ class PaymentReconciliationCalculator:
         "kapitalgewinn",
     )
 
-    def __init__(self, tolerance_chf: Decimal = Decimal("0.05"), tolerance_frac: Decimal = Decimal("0.001")):
+    def __init__(self, tolerance_chf: Decimal = Decimal("0.05"), tolerance_frac: Decimal = Decimal("0.001"), allow_above_treaty_withholding: bool = False):
         self.tolerance_chf = tolerance_chf
         self.tolerance_frac = tolerance_frac
+        self.allow_above_treaty_withholding=allow_above_treaty_withholding
         self.skip_broker_payment = False
         self.language=DEFAULT_LANGUAGE
         self.periodFrom: Optional[date] = None
@@ -278,38 +279,53 @@ class PaymentReconciliationCalculator:
                     if any((p for p in kursliste_payments if p.paymentDate == d and (p.payment_type_original not in(PaymentTypeOriginal.OTHER_BENEFIT, PaymentTypeOriginal.FUND_ACCUMULATION) or p.undefined))) == False:
                         status = "match"
             elif has_kurs and has_broker:
-                allow_broker_above_kursliste = (
+                div_note=''
+                w_note=''
+                allow_broker_dividend_above_kursliste = (
                     kurs.allows_broker_above_kursliste or broker.allows_broker_above_kursliste
                 )
-                div_ok = self._component_matches(
+                allow_broker_withholding_above_kursliste = (
+                    allow_broker_dividend_above_kursliste
+                    or self.allow_above_treaty_withholding
+                )
+                div_diff = self._component_mismatches(
                     kurs_value_chf=kurs.dividend_chf,
                     broker_value_chf=broker_div_chf,
                     broker_capital_gain_chf=broker_div_capital_gain_chf,
                     allow_bidirectional_on_noncash=kurs.noncash,
-                    allow_broker_above_kursliste=allow_broker_above_kursliste,
+                    allow_broker_above_kursliste=allow_broker_dividend_above_kursliste,
                 )
-                w_ok = self._component_matches(
+                w_diff = self._component_mismatches(
                     kurs_value_chf=kurs.withholding_chf,
                     broker_value_chf=broker_with_chf,
                     allow_bidirectional_on_noncash=kurs.noncash,
                     allow_broker_above_kursliste=(
-                        allow_broker_above_kursliste or not security_has_sensitive_overwithholding
+                        allow_broker_withholding_above_kursliste
+                        or not security_has_sensitive_overwithholding
                     ),
                 )
-                if not div_ok:
+                if div_diff:
                     broker_dividend_amount_curr = (broker_dividend_amount_curr or Decimal("0")) - broker.dividend_capital_gain
-                    note = "Broker div is below Kursliste value."
-                elif not w_ok:
+                    div_note = f'Broker dividend differs from Kursliste value beyond tolerance. delta={div_diff} CHF.'
+                if w_diff:
                     if broker.wth_correction_late_date is not None:
-                        note = f"Broker wth is below Kursliste val; late correction on {broker.wth_correction_late_date}."
+                        w_note = f"Broker wth is below Kursliste val; late correction on {broker.wth_correction_late_date}."
                     else:
                         if kurs.withholding_chf is None or kurs.withholding_chf == Decimal("0"):
-                            note = "No wth in Kursliste."
-                        elif broker_with_chf and kurs.withholding_chf < broker_with_chf:
-                            note = "Kursliste wth is below Broker value."
+                            w_note = "No wth in Kursliste."
                         else:
-                            note = "Broker wth is below Kursliste value."
-                matched = div_ok and w_ok
+                            w_note = f'Broker withholding differs from Kursliste value beyond tolerance. delta={w_diff} CHF.'
+                note =' '.join([div_note, w_note])
+                if (
+                    w_diff
+                    and not div_diff
+                    and kurs.withholding_chf != 0
+                    and abs((broker_with_chf / kurs.withholding_chf) - 2) < 0.01
+                    and country == "US"
+                ):
+                    note = (f'Broker withholding is twice Kursliste value, check that your broker has a valid '
+                            f'W8-BEN. delta={w_diff} CHF.')
+                matched = not (div_diff or w_diff)
                 status = "match" if matched else "mismatch"
             #elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
             #    skip = True
@@ -375,46 +391,51 @@ class PaymentReconciliationCalculator:
             )
 
         return rows
-    
-    def _remove_symbol_prefix(self, text: Optional[str], security: Security) -> str:
-        if text and security and security.isin and security.symbol:
-            text = text.removeprefix(f"{security.symbol}({security.isin})").removeprefix(f"{security.symbol} ({security.isin})").strip()
-        return text
-
-    def _component_matches(
+    # Return Decimal('0') if there is no mismatch, otherwise the CHF delta.
+    def _component_mismatches(
         self,
         kurs_value_chf: Decimal,
         broker_value_chf: Optional[Decimal],
         allow_bidirectional_on_noncash: bool,
         allow_broker_above_kursliste: bool,
         broker_capital_gain_chf: Optional[Decimal] = None,
-    ) -> bool:
+    ) -> Decimal:
+        mismatch_precision = Decimal("0.01")
         if broker_value_chf is None:
-            return abs(kurs_value_chf) < Decimal("0.01")
-        
+            if abs(kurs_value_chf) < Decimal("0.01"):
+                return Decimal("0")
+            else:
+                return (-kurs_value_chf).quantize(mismatch_precision)
+            
         if kurs_value_chf is None:
-            return abs(broker_value_chf) < Decimal("0.01")
+            if abs(broker_value_chf) < Decimal("0.01"):
+                return Decimal("0")
+            else:
+                return -broker_value_chf.quantize(mismatch_precision)
 
         if allow_bidirectional_on_noncash:
-            return True
+            return Decimal("0")
 
         delta = broker_value_chf - kurs_value_chf
         if abs(delta) <= self.tolerance_chf:
-            return True
+            return Decimal("0")
 
         if abs(delta) <= self.tolerance_frac * broker_value_chf:
-            return True
+            return Decimal("0")
 
         if broker_capital_gain_chf is not None: 
             delta = broker_value_chf - broker_capital_gain_chf - kurs_value_chf
             if abs(delta) <= self.tolerance_chf:
-                return True
-            #if abs(delta) <= self.tolerance_frac * broker_value_chf:
-            #    return True
+                return Decimal("0")
         elif delta > self.tolerance_chf and allow_broker_above_kursliste:
-            return True
+            return Decimal("0")
 
-        return False
+        return delta.quantize(mismatch_precision)
+    
+    def _remove_symbol_prefix(self, text: Optional[str], security: Security) -> str:
+        if text and security and security.isin and security.symbol:
+            text = text.removeprefix(f"{security.symbol}({security.isin})").removeprefix(f"{security.symbol} ({security.isin})").strip()
+        return text
 
     def _accumulate_broker(self, agg: _BrokerAgg, payment: SecurityPayment) -> None:
         if self._is_broker_above_kursliste_allowlisted(payment):
@@ -505,7 +526,7 @@ class PaymentReconciliationCalculator:
             exchange_rate_kl = getattr(tax_value, "exchangeRateKursliste", None)
             if exchange_rate_kl:
                 exchange_rate = exchange_rate_kl
-            if not ref_date or self._component_matches(tax_value.value, balance_chf, False, False) == False:
+            if not ref_date or self._component_mismatches(tax_value.value, balance_chf, False, False):
                 status = "mismatch"        
                 matched = False
                 if tax_value.value and balance_chf:
@@ -531,7 +552,7 @@ class PaymentReconciliationCalculator:
                 status=status,
                 note=note,
                 kursliste=getattr(tax_value, 'kursliste', None) or False,
-                kursliste_security=security.kursliste != None and security.kursliste,
+                kursliste_security=security.kursliste is not None and security.kursliste,
                 kursliste_undefined=getattr(tax_value, 'undefined', None)
             )
         )
