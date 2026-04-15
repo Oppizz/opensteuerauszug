@@ -1063,6 +1063,7 @@ class IbkrImporter:
 
                         action_id = getattr(cash_tx, "actionID", None)
                         exch_rate = getattr(cash_tx, "fxRateToBase", None)
+                        dividend_type: str = getattr(cash_tx, "dividendType", None)
 
                         # Update name metadata (Priority: 0 for CashTransactions - lowest)
                         # Use description or symbol if description is generic?
@@ -1087,7 +1088,7 @@ class IbkrImporter:
                         sec_payment.exchangeRate=exch_rate
                         sec_payment.brokerActionId = action_id
 
-                        if tx_type in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU] and description_lower.endswith(" (return of capital)"):
+                        if tx_type in [ibflex.CashAction.DIVIDEND, ibflex.CashAction.PAYMENTINLIEU] and ((dividend_type and dividend_type.lower() == "return of capital") or (not dividend_type and description_lower.endswith(" (return of capital)"))):
                             sec_payment.sign = "(KR)"
 
                         if asset_category == 'BOND' and ((tx_type_str_lower == "bond interest received" and description_lower.startswith("sold accrued int")) or (tx_type_str_lower == "bond interest paid" and description_lower.startswith("purchase accrued int"))):
