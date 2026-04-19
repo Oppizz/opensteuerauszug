@@ -15,6 +15,7 @@ from ..util.converters import security_tax_value_to_stock
 
 
 from ..core.flag_override_provider import FlagOverrideProvider
+from opensteuerauszug.render.translations import Language, DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,21 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
     Calculator that fills in missing values based on other available data,
     potentially after Kursliste and minimal calculations have been performed.
     """
-    def __init__(self, mode: CalculationMode, exchange_rate_provider: ExchangeRateProvider, flag_override_provider: Optional[FlagOverrideProvider] = None, keep_existing_payments: bool = False):
-        super().__init__(mode, exchange_rate_provider, flag_override_provider=flag_override_provider, keep_existing_payments=keep_existing_payments)
+    def __init__(
+        self,
+        mode: CalculationMode,
+        exchange_rate_provider: ExchangeRateProvider,
+        flag_override_provider: Optional[FlagOverrideProvider] = None,
+        keep_existing_payments: bool = False,
+        render_language: Language = DEFAULT_LANGUAGE,
+        use_broker_exch_rate: bool = False
+    ):
+        self.use_broker_exch_rate = use_broker_exch_rate
+        self.render_language = render_language
 
-        self.use_broker_exch_rate = False
+        super().__init__(
+            mode, exchange_rate_provider, flag_override_provider=flag_override_provider, keep_existing_payments=keep_existing_payments
+        )
 
         logger.info(
             "BrokerFillInTaxValueCalculator initialized with mode: %s and provider: %s",
@@ -207,17 +219,17 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             security_type = security.securityType
             security_group: SecurityGroupESTV = SecurityGroupESTV(security.securityCategory) if security.securityCategory else None
             if security.securityCategory == "SHARE":
-                payment_name = "Dividende"
+                payment_name = self._translate("dividend")
                 if security_type is None:
                     security_type = "SHARE.NOMINAL"
                 #security_group = SecurityGroupESTV.SHARE
             elif security.securityCategory == "FUND":
-                payment_name = "Dividende"
+                payment_name = self._translate("dividend")
                 if security_type is None:
                     security_type = "FUND.ACCUMULATION"
                 #security_group = SecurityGroupESTV.SHARE
             elif security.securityCategory == "BOND":
-                payment_name = "Zinszahlung"
+                payment_name = self._translate("distribution")
                 if security_type is None:
                     security_type = "BOND.BOND"
                 #security_group = SecurityGroupESTV.BOND

@@ -130,4 +130,21 @@ TRANSLATIONS = {
     "warning": "warning",
     "warnings": "warnings",
     "critical_warnings_hint": "This statement has <b>{count}</b> critical {plural}. Please review the information pages at the end of this document.",
+
+    # === XML TRANSLATIONS ===
+    "debit_interest": "Interest Payments",
+    "credit_interest": "Credit Interest",
+    "credit_interest_syep": "Credit Interest from Securities Lending (SYEP)",
+    "dividend": "Dividend",
+    "stock_split": "Stock Split",
+    "distribution": "Distribution",
+    "stock_dividend": "Stock Dividend",
+    "other_monetary_benefits": "Other Monetary Benefits",
+    "premium_agio": "Premium/Agio",
+    "taxable_income_from_accumulating_fund": "Taxable Income from Accumulating Fund",
+    "buy": "Buy",
+    "sell": "Sell",
+    "nominal_value_reduction": "Nominal Value Reduction",
+    "bank_account_balance": "{account_number} {currency} balance",
+    "opening_balance": "Opening balance",
 }

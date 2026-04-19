@@ -7,15 +7,17 @@ Falls back to German ('de') if a translation is missing in the requested languag
 
 import importlib
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Literal
 
 logger = logging.getLogger(__name__)
+
+# Supported languages
+Language = Literal['de', 'en', 'fr', 'it']
 
 # Cache for loaded translation modules
 _translation_cache: Dict[str, Dict[str, str]] = {}
 
-# Default language
-DEFAULT_LANGUAGE = 'de'
+DEFAULT_LANGUAGE: Language = 'de'
 
 
 def _load_translations(lang: str) -> Optional[Dict[str, str]]:
@@ -70,6 +72,18 @@ def get_text(key: str, lang: str = DEFAULT_LANGUAGE) -> str:
     logger.warning(f"Translation key '{key}' not found in any language, returning key as fallback")
     return key
 
+def exists_text(key: str, lang: str = DEFAULT_LANGUAGE) -> bool:
+    """Check if a translation exists for a given key in the specified language.
+
+    Args:
+        key: The translation key
+        lang: The language code (default: 'de')
+
+    Returns:
+        True if the translation exists, False otherwise
+    """
+    translations = _load_translations(lang)
+    return translations is not None and key in translations
 
 def t(key: str, lang: str = DEFAULT_LANGUAGE) -> str:
     """Shorthand alias for get_text.

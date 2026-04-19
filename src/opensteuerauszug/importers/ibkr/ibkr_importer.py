@@ -18,6 +18,7 @@ from opensteuerauszug.model.ech0196 import (
 from opensteuerauszug.core.position_reconciler import PositionReconciler
 from opensteuerauszug.config.models import IbkrAccountSettings
 from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
+from opensteuerauszug.render.translations import get_text, exists_text, Language, DEFAULT_LANGUAGE
 
 IBKR_ASSET_CATEGORY_TO_ECH_SECURITY_CATEGORY: Final[Dict[str, SecurityCategory]] = {
     "STK": "SHARE",
@@ -218,7 +219,8 @@ class IbkrImporter:
     def __init__(self,
                  period_from: date,
                  period_to: date,
-                 account_settings_list: List[IbkrAccountSettings]):
+                 account_settings_list: List[IbkrAccountSettings],
+                 render_language: Language = DEFAULT_LANGUAGE):
         """
         Initialize the importer with a tax period.
 
@@ -226,10 +228,12 @@ class IbkrImporter:
             period_from (date): The start date of the tax period.
             period_to (date): The end date of the tax period.
             account_settings_list: List of IBKR account settings.
+            render_language (Language): Language for translations.
         """
         self.period_from = period_from
         self.period_to = period_to
         self.account_settings_list = account_settings_list
+        self.render_language = render_language
 
         if not self.account_settings_list:
             # Currently no account info is used so we keep stumm.
@@ -716,7 +720,7 @@ class IbkrImporter:
                         mutation=True,
                         quantity=quantity,
                         unitPrice=trade_price if trade_price != Decimal(0) or asset_category in ["OPT", "FOP"] else None,
-                        name="Kauf" if buy_sell.value == "BUY" else ("Verkauf" if buy_sell.value == "SELL" else buy_sell.value),
+                        name=get_text(buy_sell.value.lower(), self.render_language) if exists_text(buy_sell.value.lower(), self.render_language) else buy_sell.value,
                         orderId=trade.ibOrderID,
                         balanceCurrency=currency,
                         quotationType=self._get_security_quote_type(
@@ -821,7 +825,6 @@ class IbkrImporter:
                         referenceDate=end_plus_one,
                         mutation=False,
                         quantity=quantity,
-                        name=f"End of Period Balance {symbol}",
                         balanceCurrency=currency,
                         quotationType=self._get_security_quote_type(
                             security_quote_type_map, sec_pos, open_pos, quantity, pos_value, mark_price),
@@ -1167,7 +1170,7 @@ class IbkrImporter:
                             # Interst paid due to negative balance: description starting with "<CURRENCY> DEBIT INT FOR"
                             if description.startswith(f"{currency} DEBIT INT FOR"):
                                 # Tax relevant event. Fall through to create a bank payment.
-                                description = "Sollzinsen"
+                                description = get_text("debit_interest", self.render_language)
                                 pass
                             else:
                                 # TODO: CREDIT INT is charged on positive balance and would belong to fees (not liabilities).
@@ -1184,9 +1187,9 @@ class IbkrImporter:
                         elif tx_type in [ibflex.CashAction.BROKERINTRCVD]:
                             # Tax relevant event. Fall through to create a bank payment.
                             if "(SYEP)" in description:
-                                description = "Habenzinsen aus Aktienverleih (SYEP)"
+                                description = get_text("credit_interest_syep", self.render_language)
                             else:
-                                description = "Habenzinsen"
+                                description = get_text("credit_interest", self.render_language)
                             pass
                         elif tx_type in [ibflex.CashAction.WHTAX]:
                             # Withholding tax not linked to a security (e.g. yield enhancement).
@@ -1379,8 +1382,7 @@ class IbkrImporter:
                         mutation=False,
                         quotationType=primary_quotation_type,
                         quantity=opening_balance,
-                        balanceCurrency=primary_currency,
-                        name="Anfangssaldo"
+                        balanceCurrency=primary_currency
                     )
                 )
 
@@ -1396,8 +1398,7 @@ class IbkrImporter:
                         quotationType=primary_quotation_type,
                         quantity=closing_balance,
                         balance=closing_value,
-                        balanceCurrency=primary_currency,
-                        name="Endsaldo"
+                        balanceCurrency=primary_currency
                     )
                 )
 
@@ -1595,7 +1596,6 @@ class IbkrImporter:
             if closing_balance_value is not None:
                 bank_account_tax_value_obj = BankAccountTaxValue(
                     referenceDate=self.period_to,
-                    name="Closing Balance",
                     balanceCurrency=curr,
                     balance=closing_balance_value
                 )
@@ -1612,7 +1612,7 @@ class IbkrImporter:
                 )
 
             bank_account_num_str = f"{acc_id}-{curr}"
-            bank_account_name_str = f"{acc_id} {curr} Guthaben"
+            bank_account_name_str = get_text("bank_account_balance", self.render_language).format(account_number=acc_id, currency=curr)
 
             # Look up dates for this specific account
             dates_for_account = account_dates.get(acc_id, {})

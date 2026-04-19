@@ -24,7 +24,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4, landscape
 import logging
 
-from opensteuerauszug.model.ech0196 import TaxStatement, SecurityPayment, Security, CountryIdISO2Type
+from opensteuerauszug.model.ech0196 import TaxStatement, Security, CountryIdISO2Type, SecurityPayment
 from .onedee import OneDeeBarCode
 from ..model.payment_reconciliation import PaymentReconciliationRow, TaxValueReconciliationRow
 from ..core.constants import NON_TAXABLE_SIGNS
@@ -1854,7 +1854,7 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                         if entry.corpAction:
                             name = t('corp_action')
                     else:
-                        name = t('balance')
+                        name = t('opening_balance')
                     table_data.append([
                         Paragraph(entry.referenceDate.strftime("%d.%m.%Y") if entry.referenceDate else '', val_left),
                         Paragraph(name, val_left),

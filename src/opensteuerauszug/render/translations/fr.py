@@ -130,4 +130,21 @@ TRANSLATIONS = {
     "warning": "avertissement",
     "warnings": "avertissements",
     "critical_warnings_hint": "Cet extrait contient <b>{count}</b> {plural} critique(s). Veuillez consulter les pages d'information à la fin de ce document.",
+
+    # === XML TRANSLATIONS ===
+    "debit_interest": "Paiements d'intérêts",
+    "credit_interest": "Intérêts créditeurs",
+    "credit_interest_syep": "Intérêts créditeurs du prêt de titres (SYEP)",
+    "dividend": "Dividende",
+    "stock_split": "Fractionnement d'actions",
+    "distribution": "Distribution",
+    "stock_dividend": "Dividende en actions",
+    "other_monetary_benefits": "Autres avantages monétaires",
+    "premium_agio": "Prime/Agio",
+    "taxable_income_from_accumulating_fund": "Revenus imposables du fonds d'accumulation",
+    "buy": "Acheter",
+    "sell": "Vendre",
+    "nominal_value_reduction": "Réduction de la valeur nominale",
+    "bank_account_balance": "Solde {account_number} {currency}",
+    "opening_balance": "Solde d'ouverture",
 }
