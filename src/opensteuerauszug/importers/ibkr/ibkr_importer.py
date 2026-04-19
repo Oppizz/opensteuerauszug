@@ -106,20 +106,6 @@ class IbkrImporter:
             )
         return value
     
-    def _qty_apply_multiplier(self, data_object: Any, quantity: Decimal,
-                              object_description: str) -> Decimal:
-        """Helper to apply multiplier to quantity."""
-        assetCat = getattr(data_object, "assetCategory", None)
-        subCat = getattr(data_object, "subCategory", None)
-        if subCat is not None:
-            subCat = subCat.upper()
-        country = self._normalize_country_code(getattr(data_object, "issuerCountryCode", None))
-        quantity_converted = quantity
-        if assetCat == "BOND" and subCat and subCat == "CORP" and country and country in ["US", "CA"] and quantity % 1000 == 0:
-            quantity_converted = quantity / 1000
-
-        return quantity_converted
-
     def _price_apply_multiplier(self, data_object: Any, price: Decimal,
                               object_description: str) -> Decimal:
         """Helper to apply multiplier to quantity."""
@@ -177,6 +163,57 @@ class IbkrImporter:
             return
         if not existing:
             security_country_map[sec_pos] = country_code
+
+    def _get_security_quote_type(
+        self, 
+        security_quote_type_map: Dict[SecurityPosition, str],
+        sec_pos: SecurityPosition,
+        data_object: Any,
+        quantity: Optional[Decimal] = None,
+        amount: Optional[Decimal] = None,
+        price: Optional[Decimal] = None,
+        allow_none: bool = False
+    ) -> QuotationType | None:
+        existing = security_quote_type_map.get(sec_pos)
+        quote_type = "PIECE"  # Default quote type
+
+        asset_category = getattr(data_object, "assetCategory", None)
+        sub_category = getattr(data_object, "subCategory", None)
+        if asset_category is not None:
+            asset_category = asset_category.upper()
+        if sub_category is not None:
+            sub_category = sub_category.upper()
+        country = self._normalize_country_code(getattr(data_object, "issuerCountryCode", None))
+
+        if asset_category and asset_category == "BOND" and sub_category and sub_category == "CORP" and country and country in ["US", "CA"]:
+            if quantity and amount and not price and not existing and allow_none:
+                price = Decimal("100")   # simulate 100% for corp action
+            if not quantity or not amount or not price:
+                if not existing:
+                    if allow_none:
+                        return None
+                    logger.warning(
+                        "Insufficient data to determine quote type for %s should be determined by other data than '%s'",
+                        sec_pos.get_processing_identifier(),
+                        data_object.__class__.__name__ if data_object else "unknown",
+                    )
+                    return quote_type
+                return existing
+            if quantity % 100 == 0 and round(quantity * price / Decimal("100"), 2) == round(amount, 2):
+                quote_type = "PERCENT"
+
+        if existing and existing != quote_type:
+            logger.warning(
+                "Conflicting quote type for %s: %s (existing: %s)",
+                sec_pos.get_processing_identifier(),
+                quote_type,
+                existing,
+            )
+
+        if not existing:
+            security_quote_type_map[sec_pos] = quote_type
+
+        return quote_type
 
     def __init__(self,
                  period_from: date,
@@ -538,6 +575,7 @@ class IbkrImporter:
         processed_cash_positions: defaultdict[tuple, CashPositionData] = \
             defaultdict(lambda: {'stocks': [], 'payments': []})
         security_country_map: Dict[SecurityPosition, str] = {}
+        security_quote_type_map: Dict[SecurityPosition, str] = {}
 
         # Map to store assetCategory and subCategory for each security
         security_asset_category_map: Dict[SecurityPosition, tuple[str, Optional[str]]] = {}
@@ -608,7 +646,6 @@ class IbkrImporter:
                         self._get_required_field(trade, 'quantity', 'Trade'),
                         'quantity', f"Trade {symbol}"
                     )
-                    quantity = self._qty_apply_multiplier(trade, quantity, f"Trade {symbol}")
                     
                     trade_price = self._to_decimal(
                         self._get_required_field(trade, 'tradePrice', 'Trade'),
@@ -682,7 +719,8 @@ class IbkrImporter:
                         name="Kauf" if buy_sell.value == "BUY" else ("Verkauf" if buy_sell.value == "SELL" else buy_sell.value),
                         orderId=trade.ibOrderID,
                         balanceCurrency=currency,
-                        quotationType="PIECE",
+                        quotationType=self._get_security_quote_type(
+                            security_quote_type_map, sec_pos, trade, quantity, trade_money, trade_price),
                         fractional=True if transaction_type and transaction_type.upper() == "FRACSHARE" else None,
                     )
                     processed_security_positions[sec_pos]['stocks'].append(
@@ -726,7 +764,6 @@ class IbkrImporter:
                                                  'OpenPosition'),
                         'position', f"OpenPosition {symbol}"
                     )
-                    quantity = self._qty_apply_multiplier(open_pos, quantity, f"OpenPosition {symbol}")
                     currency = self._get_required_field(
                         open_pos, 'currency', 'OpenPosition'
                     )
@@ -775,9 +812,9 @@ class IbkrImporter:
                     if getattr(open_pos, 'positionValue', None) is not None:
                         pos_value = self._to_decimal(open_pos.positionValue, 'positionValue', f"OpenPosition {symbol}")
 
-                    if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country in ["US", "CA"]:
+                    #if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country in ["US", "CA"]:
                         # For US and CA (and others?) corporate bonds, price is a percentage of nominal value, so we need to adjust the mark price accordingly
-                        mark_price = pos_value / quantity
+                        #mark_price = pos_value / quantity
 
                     balance_stock = SecurityStock(
                         # Balance as of the period end + 1
@@ -786,7 +823,8 @@ class IbkrImporter:
                         quantity=quantity,
                         name=f"End of Period Balance {symbol}",
                         balanceCurrency=currency,
-                        quotationType="PIECE",
+                        quotationType=self._get_security_quote_type(
+                            security_quote_type_map, sec_pos, open_pos, quantity, pos_value, mark_price),
                         unitPrice=mark_price,
                         balance=pos_value,
                     )
@@ -827,7 +865,6 @@ class IbkrImporter:
                         self._get_required_field(transfer, 'quantity', 'Transfer'),
                         'quantity', f"Transfer {symbol}"
                     )
-                    quantity = self._qty_apply_multiplier(transfer, quantity, f"Transfer {symbol}")
 
                     direction = transfer.direction
                     direction_val = direction.value.upper() if direction else None
@@ -870,7 +907,8 @@ class IbkrImporter:
                         quantity=quantity,
                         name=f"{transfer_type_val} {account}" + (" (Cancelled)" if is_cancel else ""),
                         balanceCurrency=currency,
-                        quotationType="PIECE",
+                        quotationType=self._get_security_quote_type(
+                            security_quote_type_map, sec_pos, transfer), # should we consider quantity and amount for quote type inference here as well?
                     )
 
                     processed_security_positions[sec_pos]['stocks'].append(
@@ -905,7 +943,6 @@ class IbkrImporter:
                         "quantity",
                         f"CorporateAction {symbol}",
                     )
-                    quantity = self._qty_apply_multiplier(action, quantity, f"CorporateAction {symbol}")
 
                     currency = self._get_required_field(action, "currency", "CorporateAction")
 
@@ -913,13 +950,26 @@ class IbkrImporter:
 
                     action_id = getattr(action, "actionID", None)
 
-                    sec_pos = SecurityPosition(
-                        depot=account_id,
-                        valor=None,
-                        isin=ISINType(isin) if isin else None,
-                        symbol=conid,
-                        description=f"{description} ({symbol})",
+                    amount = self._to_decimal(
+                        self._get_required_field(action, 'amount',
+                                                 'CorporateAction'),
+                        'amount', f"CorporateAction {description[:30]}"
                     )
+
+                    sec_pos = self._find_processed_security_position(
+                        processed_security_positions,
+                        account_id,
+                        conid,
+                    )
+
+                    if sec_pos is None:
+                        sec_pos = SecurityPosition(
+                            depot=account_id,
+                            valor=None,
+                            isin=ISINType(isin) if isin else None,
+                            symbol=conid,
+                            description=f"{description} ({symbol})",
+                        )
 
                     issuer_country = self._normalize_country_code(
                         getattr(action, 'issuerCountryCode', None)
@@ -965,13 +1015,16 @@ class IbkrImporter:
                         rights_issue_positions.add(sec_pos)
                     exch_rate = getattr(action, "fxRateToBase", None)
 
+                    quotation_type = self._get_security_quote_type(
+                        security_quote_type_map, sec_pos, action, quantity, amount, allow_none=True)
                     stock_mutation = SecurityStock(
                         referenceDate=action_date,
                         mutation=True,
                         quantity=quantity,
                         name=action_description,
                         balanceCurrency=currency,
-                        quotationType="PIECE",
+                        quotationType=quotation_type or 'PIECE',
+                        quotationTypeInvalid=None if quotation_type else True,
                         exchangeRate=exch_rate,
                         corpAction=True
                     )
@@ -990,8 +1043,16 @@ class IbkrImporter:
                         action_secpos_map[action_id].append((stock_mutation, isin))
                 for action_id_dummy, stock_mutations in action_secpos_map.items():
                     if len(stock_mutations)>1:
-                        stock_mutations[0][0].corpActionPeerIsin = ISINType(stock_mutations[1][1])
-                        stock_mutations[1][0].corpActionPeerIsin = ISINType(stock_mutations[0][1])
+                        stock1 = stock_mutations[0][0]
+                        stock2 = stock_mutations[1][0]
+                        stock1.corpActionPeerIsin = ISINType(stock_mutations[1][1])
+                        stock2.corpActionPeerIsin = ISINType(stock_mutations[0][1])
+                        if stock1.quotationTypeInvalid and not stock2.quotationTypeInvalid:
+                            stock1.quotationType = stock2.quotationType
+                            stock1.quotationTypeInvalid = None
+                        elif stock2.quotationTypeInvalid and not stock1.quotationTypeInvalid:
+                            stock2.quotationType = stock1.quotationType
+                            stock2.quotationTypeInvalid = None
 
             # --- Process Cash Transactions ---
             if stmt.CashTransactions:
@@ -1207,7 +1268,7 @@ class IbkrImporter:
 
             # Determine currency and quotation type from stocks or defaults
             primary_currency = None
-            primary_quotation_type: QuotationType = "PIECE" # Default
+            primary_quotation_type: QuotationType = None # Default
             if sorted_stocks:
                 # Try balance entry first, then any entry
                 balance_stocks = [
@@ -1215,10 +1276,12 @@ class IbkrImporter:
                 ]
                 if balance_stocks:
                     primary_currency = balance_stocks[0].balanceCurrency
-                    primary_quotation_type = balance_stocks[0].quotationType
+                    if not balance_stocks[0].quotationTypeInvalid:
+                        primary_quotation_type = balance_stocks[0].quotationType
                 else:  # Try any stock
                     primary_currency = sorted_stocks[0].balanceCurrency
-                    primary_quotation_type = sorted_stocks[0].quotationType
+                    if not sorted_stocks[0].quotationTypeInvalid:
+                        primary_quotation_type = sorted_stocks[0].quotationType
 
             if not primary_currency:  # Fallback if no stocks or no currency
                 if sorted_payments:
@@ -1229,6 +1292,23 @@ class IbkrImporter:
                         f"{sec_pos_obj.symbol} (Desc: {sec_pos_obj.description}). "
                         f"No stocks or payments with currency info."
                     )
+            if not primary_quotation_type:
+                if sorted_stocks:
+                    quote_type_stock = next((s for s in sorted_stocks if not s.quotationTypeInvalid), None)
+                    if quote_type_stock:
+                        primary_quotation_type = quote_type_stock.quotationType
+                if not primary_quotation_type:
+                    raise ValueError(
+                        f"Cannot determine quotation type for security "
+                        f"{sec_pos_obj.symbol} (Desc: {sec_pos_obj.description}). "
+                        f"No stocks or payments with quotation type info."
+                    )
+                    
+            if sorted_stocks:
+                for s in sorted_stocks:
+                    if s.quotationTypeInvalid:
+                        s.quotationType = primary_quotation_type
+                        s.quotationTypeInvalid = None
 
             # TODO: Map assetCategory to eCH-0196 SecurityCategory
             # Get assetCategory and subCategory from the map, default to "STK"
@@ -1358,7 +1438,8 @@ class IbkrImporter:
                 country=country,
                 stock=sorted_stocks,
                 payment=sorted_payments,
-                symbol=ticker
+                symbol=ticker,
+                nominalValue=Decimal("1000") if primary_quotation_type == "PERCENT" and asset_cat == "BOND" and country in ["US", "CA"] else None,
             )
 
             if is_rights_issue:

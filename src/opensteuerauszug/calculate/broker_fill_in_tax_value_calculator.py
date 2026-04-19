@@ -70,6 +70,8 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
         value_to_convert = sec_tax_value.balance
         if value_to_convert is not None:# and sec_tax_value.unitPrice is None:
             price = value_to_convert / sec_tax_value.quantity if sec_tax_value.quantity and sec_tax_value.quantity != 0 else None
+            if sec_tax_value.quotationType == "PERCENT":
+                price = price * Decimal("100")
             self._set_field_value(sec_tax_value, "unitPrice", price, path_prefix)
 
         chf_value, rate = self._convert_to_chf(
@@ -253,6 +255,10 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                 raise ValueError(
                     f"Payment on {pay.paymentDate} for {security.isin or security.securityName} missing paymentValueCHF"
                 )
+            
+            if security.quotationType == "PERCENT" and security.nominalValue and quantity % security.nominalValue == 0:
+                # For percentage payments on securities with nominal value, the amount per unit is based on the nominal value, not the market price.
+                payment_value = payment_value * security.nominalValue
 
             rate = exchange_rate
             if rate is None and payment_value_chf != 0:

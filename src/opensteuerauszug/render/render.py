@@ -114,7 +114,7 @@ def format_currency_2dp(value: Decimal, default='0.00'):
     except: return default
 
 # For most values we use 2 decimals, or leave blank it None or zero
-def format_currency(value: Optional[Decimal], default='', allow_zero: bool = False):
+def format_currency(value: Optional[Decimal], default='', allow_zero: bool = False, align_padding_digits: int = 0):
     """Format currency, trimming trailing zeros for better alignment."""
     if (value is None or value == Decimal(0)) and allow_zero == False:
         return default
@@ -124,14 +124,15 @@ def format_currency(value: Optional[Decimal], default='', allow_zero: bool = Fal
 
         two_dec = decimal_value.quantize(Decimal("0.01"))
         three_dec = decimal_value.quantize(Decimal("0.001"))
-        four_dec = decimal_value.quantize(Decimal("0.0001"))
 
-        if value < 1.0 and three_dec != four_dec:
-            formatted = "{:,.4f}".format(four_dec)
-        elif two_dec == three_dec:
+        if two_dec == three_dec:
             formatted = "{:,.2f}".format(two_dec)
+            if align_padding_digits > 2:
+                formatted += f"<font color='white'>{'0'*(align_padding_digits-2)}</font>"
         else:
             formatted = "{:,.3f}".format(three_dec)
+            if align_padding_digits > 3:
+                formatted += f"<font color='white'>{'0'*(align_padding_digits-3)}</font>"
 
         return formatted.replace(',', "'")
     except Exception:
@@ -1781,10 +1782,11 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                 cur_country = f"{security.currency or ''}<br/>{security.country}"
             else:
                 cur_country = security.currency
+            nominal_value_str = format_stock_quantity(security.nominalValue, False, stock_quantity_template) if security.nominalValue and security.quotationType == "PERCENT" else ''
             table_data.append([
                 Paragraph(f"{security.valorNumber or ''}", bold_left),
                 Paragraph(f"<b>{escape_html_for_paragraph(security.securityName or '')}</b><br/>{escape_html_for_paragraph(security.isin or '')}", val_left),
-                Paragraph('', val_right),
+                Paragraph(nominal_value_str, val_right),
                 Paragraph(cur_country, val_right),
                 Paragraph('', val_right),
                 Paragraph('', val_right),
@@ -1798,19 +1800,28 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
             current_row += 1
             # Collect all payments and stock entries, sort by date
             entries = []
-            precision = find_minimal_decimals(security.nominalValue)
+            precision = Decimal("0") #find_minimal_decimals(security.nominalValue)
+            price_digits = 0
             if getattr(security, 'payment', None):
                 for payment in security.payment:
                     entries.append(('payment', payment.paymentDate or payment.exDate, 1, payment))
                     precision = max(precision, find_minimal_decimals(payment.quantity))
+                    if payment.amountPerUnit:
+                        price_digits = max(price_digits, find_minimal_decimals(round_accounting(payment.amountPerUnit)))
             if getattr(security, 'stock', None):
                 for stock in security.stock:
                     entries.append(('stock', stock.referenceDate, 1 if stock.corpAction else 2, stock))
                     precision = max(precision, find_minimal_decimals(stock.quantity))
+                    if stock.unitPrice:
+                        price_digits = max(price_digits, find_minimal_decimals(round_accounting(stock.unitPrice)))
+            if security.taxValue and getattr(security.taxValue, 'unitPrice', None):
+                price_digits = max(price_digits, find_minimal_decimals(round_accounting(security.taxValue.unitPrice)))
             if precision > 0:
                 stock_quantity_template = Decimal('0.' + '0' * precision)
             else:
                 stock_quantity_template = Decimal('0')
+            if price_digits > 0:
+                price_digits = min(price_digits, 4)  # limit to 4 digits to avoid excessive padding
             entries.sort(key=lambda x: (x[1] or '', x[2] or 1))
 
             # Render each entry
@@ -1824,7 +1835,7 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                         Paragraph(name, val_left),
                         Paragraph(format_stock_quantity(entry.quantity, False, stock_quantity_template), val_right),
                         Paragraph(entry.amountCurrency or '', val_right),
-                        Paragraph(format_currency(entry.amountPerUnit), val_right),
+                        Paragraph(format_currency(entry.amountPerUnit, align_padding_digits=price_digits), val_right),
                         Paragraph(entry.exDate.strftime("%d.%m.%y") if getattr(entry, 'exDate', None) else '', val_right),
                         Paragraph(format_exchange_rate(entry.exchangeRate) if getattr(entry, 'exchangeRate', None) else '', val_right),
                         Paragraph('', val_right),
@@ -1836,7 +1847,7 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                         Paragraph(format_currency(entry.additionalWithHoldingTaxUSA), val_right),
                     ])
                 elif entry_type == 'stock':
-                    if entry.quotationType != 'PIECE':
+                    if entry.quotationType != 'PIECE' and security.securityCategory != "BOND":
                         raise NotImplementedError("Cannot render stock type")
                     if entry.mutation:
                         name = entry.name
@@ -1850,7 +1861,7 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
                         Paragraph(format_stock_quantity(entry.quantity, entry.mutation, stock_quantity_template), val_right),
                         Paragraph(entry.balanceCurrency if entry.unitPrice else '', val_right),
                         # TODO: What should the resolution of unit price be? UK stocks can have fractions of a penny
-                        Paragraph(format_currency(entry.unitPrice), val_right),
+                        Paragraph(f"{'% ' if entry.unitPrice and entry.quotationType == 'PERCENT' else ''}{format_currency(entry.unitPrice, align_padding_digits=price_digits)}", val_right),
                         Paragraph('', val_left),
                         Paragraph(format_exchange_rate(entry.exchangeRate) if getattr(entry, 'exchangeRate', None) else '', val_right),
                         Paragraph('', val_right),
@@ -1872,7 +1883,9 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
 
             unit_price = ''
             if tax_value and getattr(tax_value, 'unitPrice', None):
-                unit_price = format_currency(tax_value.unitPrice)
+                unit_price = format_currency(tax_value.unitPrice, align_padding_digits=price_digits)
+                if tax_value.quotationType == 'PERCENT':
+                    unit_price = f"% {unit_price}"
             elif tax_value and getattr(tax_value, 'undefined', None):
                 unit_price = t('na')
             table_data.append([
@@ -2506,7 +2519,7 @@ def create_taxvalue_reconciliation_tables(tax_statement: TaxStatement, styles, u
                 status_mark += f"<br/><font size=7>{t('sec_is_in_kursliste')}</font>"
             data.append([
                 Paragraph(escape_html_for_paragraph(row.security), val_left),
-                Paragraph('K' if row.kursliste == True else 'B', val_left),
+                Paragraph('K' if row.kursliste is True else 'B', val_left),
                 Paragraph(row.broker_amount_currency, val_left),
                 Paragraph(format_exchange_rate(row.exchange_rate), val_right),
                 Paragraph(broker_value, val_right),

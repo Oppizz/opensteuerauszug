@@ -522,15 +522,15 @@ class PaymentReconciliationCalculator:
         exchange_rate = tax_value.exchangeRate
         if getattr(tax_value, 'kursliste', None):
             ref_date = tax_value.referenceDate
-            balance_chf = getattr(tax_value, "balance_CHF", None)
+            value_broker = getattr(tax_value, "valueBroker", None)
             exchange_rate_kl = getattr(tax_value, "exchangeRateKursliste", None)
             if exchange_rate_kl:
                 exchange_rate = exchange_rate_kl
-            if not ref_date or self._component_mismatches(tax_value.value, balance_chf, False, False):
+            if not ref_date or self._component_mismatches(tax_value.value, value_broker, False, False):
                 status = "mismatch"        
                 matched = False
-                if tax_value.value and balance_chf:
-                    diff_chf = tax_value.value - balance_chf
+                if tax_value.value and value_broker:
+                    diff_chf = tax_value.value - value_broker
                     decimal_value = Decimal(str(diff_chf)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                     formatted = '{:,.2f}'.format(decimal_value).replace(',', "'")
                     if diff_chf > 0:
@@ -545,7 +545,7 @@ class PaymentReconciliationCalculator:
                 country=security.country,
                 security=security.securityName,
                 kursliste_value_chf=tax_value.value,
-                broker_amount=tax_value.balance,
+                broker_amount=tax_value.balanceBroker,
                 broker_amount_currency=tax_value.balanceCurrencyBroker,
                 exchange_rate=exchange_rate,
                 matched=matched,

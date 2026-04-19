@@ -1079,7 +1079,8 @@ class SecurityTaxValue(BaseXmlModel):
     kursliste: Optional[bool] = Field(default=None, json_schema_extra={'is_attribute': True})
     
     balanceCurrencyBroker: Optional[CurrencyId] = Field(default=None, exclude=True)
-    balance_CHF: Optional[Decimal] = Field(default=None, exclude=True)
+    valueBroker: Optional[Decimal] = Field(default=None, exclude=True)
+    balanceBroker: Optional[Decimal] = Field(default=None, exclude=True)
     exchangeRateKursliste: Optional[Decimal] = Field(default=None, exclude=True)
 
     model_config = {
@@ -1171,6 +1172,7 @@ class SecurityPayment(BaseXmlModel):
     remark: List[Remark] = Field(default=None, exclude=True)
     # broker amount in CHF
     amount_CHF: Optional[Decimal] = Field(default=None, exclude=True)
+    
     model_config = {
         "json_schema_extra": {'tag_name': 'payment', 'tag_namespace': NS_MAP['eCH-0196']}
     }
@@ -1204,6 +1206,7 @@ class SecurityStock(BaseXmlModel):
     corpActionPeerIsin: Optional[ISINType] = Field(default=None, exclude=True)
     settleDate: Optional[date] = Field(default=None, exclude=True)
     fractional: Optional[bool] = Field(default=None, exclude=True)
+    quotationTypeInvalid: Optional[bool] = Field(default=None, exclude=True)
 
     model_config = {
         "json_schema_extra": {'tag_name': 'stock', 'tag_namespace': NS_MAP['eCH-0196']},

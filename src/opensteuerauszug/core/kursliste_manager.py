@@ -239,7 +239,7 @@ class KurslisteManager:
                 f"Please ensure kursliste_{required_year}.sqlite or kursliste_{required_year}.xml exists{dir_info}"
             )
         
-    def get_security_price(self, tax_year: int, isin: str, price_date: Optional[datetime.date] = None) -> Optional[Decimal]:
+    def get_security_price(self, tax_year: int, isin: str, price_date: Optional[datetime.date] = None) -> Optional[KusrslisteTaxValue]:
         """
         Get the price of a security for a specific tax year and ISIN.
         If price_date is provided, it attempts to find the price for that specific date.
@@ -273,10 +273,13 @@ class KurslisteManager:
             if hasattr(security_model, 'daily') and security_model.daily:
                 for daily_price_info in security_model.daily:
                     if daily_price_info.date == price_date:
-                        if daily_price_info.taxValueCHF is not None:
-                            return Decimal(str(daily_price_info.taxValueCHF))
-                        if daily_price_info.taxValue is not None: # Fallback
-                            return Decimal(str(daily_price_info.taxValue))
+                        if daily_price_info.taxValueCHF is not None or daily_price_info.taxValue is not None:
+                            tax_value = KusrslisteTaxValue(tax_value_chf=Decimal(str(daily_price_info.taxValueCHF)) if daily_price_info.taxValue is not None else None, tax_value=Decimal(str(daily_price_info.taxValue)) if daily_price_info.taxValue is not None else None)
+                            if hasattr(daily_price_info, 'percent') and daily_price_info.percent is not None:
+                                tax_value.percent = daily_price_info.percent
+                            if hasattr(daily_price_info, 'exchangeRate') and daily_price_info.exchangeRate is not None:
+                                tax_value.exchangeRate = daily_price_info.exchangeRate
+                        
                         # If only percent is available, one might need nominal value and quotation type logic
                         # For now, sticking to taxValueCHF and taxValue.
             # If specific date price not found in daily, we might fall through to year-end if desired,
@@ -292,10 +295,13 @@ class KurslisteManager:
             
             for ye_price_info in yearend_price_list:
                 if ye_price_info: # Ensure the yearend price object itself is not None
-                    if ye_price_info.taxValueCHF is not None:
-                        return Decimal(str(ye_price_info.taxValueCHF))
-                    if ye_price_info.taxValue is not None: # Fallback
-                        return Decimal(str(ye_price_info.taxValue))
+                    if ye_price_info.taxValueCHF is not None or ye_price_info.taxValue is not None: # Fallback
+                        tax_value = KusrslisteTaxValue(tax_value_chf=Decimal(str(ye_price_info.taxValueCHF)) if ye_price_info.taxValueCHF is not None else None, tax_value=Decimal(str(ye_price_info.taxValue)) if ye_price_info.taxValue is not None else None)
+                        if hasattr(ye_price_info, 'percent') and ye_price_info.percent is not None:
+                            tax_value.percent = ye_price_info.percent
+                        if hasattr(ye_price_info, 'exchangeRate') and ye_price_info.exchangeRate is not None:
+                            tax_value.exchangeRate = ye_price_info.exchangeRate
+                        return tax_value
         
         return None # No suitable price found in the security model
 
@@ -311,3 +317,18 @@ class KurslisteManager:
 
         payments = security_model.payment
         return [p for p in payments if not p.deleted]
+    
+class KusrslisteTaxValue:
+    """
+    Represents the tax value information for a security from the Kursliste.
+    This is a simplified data structure that can be used in calculations or rendering.
+    """
+    def __init__(self, tax_value_chf: Optional[Decimal], tax_value: Optional[Decimal]):
+        self.taxValueCHF: Optional[Decimal] = tax_value_chf
+        self.taxValue: Optional[Decimal] = tax_value
+        self.percent: Optional[Decimal] = None
+        self.exchangeRate: Optional[Decimal] = None
+
+    def tax_value_chf(self) -> Optional[Decimal]:
+        """Returns the tax value in CHF, using taxValueCHF if available, otherwise taxValue."""
+        return self.taxValueCHF or self.taxValue

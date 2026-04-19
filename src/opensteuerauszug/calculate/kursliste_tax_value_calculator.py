@@ -223,6 +223,8 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 security.redemptionDate = kl_sec.redemptionDate
             if getattr(kl_sec, "interestRate", None) is not None:
                 security.interestRate = kl_sec.interestRate
+            if getattr(kl_sec, "nominalValue", None) is not None:
+                security.nominalValue = kl_sec.nominalValue
         else:
             '''
             ident = (
@@ -265,23 +267,47 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
         if self._current_kursliste_security and self.kursliste_manager:
             ref_date = sec_tax_value.referenceDate
             if ref_date:
-                price = self.kursliste_manager.get_security_price(
+                security_price = self.kursliste_manager.get_security_price(
                     ref_date.year,
                     self._current_kursliste_security.isin or "",
                     price_date=ref_date,
                 )
-                if price is not None:
-                    balanceCurrencyBroker = getattr(sec_tax_value, "balanceCurrencyBroker", None)
-                    if balanceCurrencyBroker and sec_tax_value.balance:
-                        chf_value, rate = self._convert_to_chf(
-                            sec_tax_value.balance,
-                            sec_tax_value.balanceCurrencyBroker,
-                            f"{path_prefix}.exchangeRate",
-                            ref_date
-                        )
-                        self._set_field_value(sec_tax_value, "balance_CHF", chf_value, path_prefix)
-                        self._set_field_value(sec_tax_value, "exchangeRateKursliste", rate, path_prefix)
+                balance_currency_broker = getattr(sec_tax_value, "balanceCurrencyBroker", None)
+                if balance_currency_broker and sec_tax_value.balance:
+                    chf_value, rate = self._convert_to_chf(
+                        sec_tax_value.balance,
+                        sec_tax_value.balanceCurrencyBroker,
+                        f"{path_prefix}.exchangeRate",
+                        ref_date
+                    )
+                    self._set_field_value(sec_tax_value, "valueBroker", chf_value, path_prefix)
+                    self._set_field_value(sec_tax_value, "balanceBroker", sec_tax_value.balance, path_prefix)
+                    self._set_field_value(sec_tax_value, "exchangeRateKursliste", rate, path_prefix)
 
+                price = security_price.tax_value_chf() if security_price else None
+                if sec_tax_value.quotationType == "PERCENT" and security_price and security_price.percent is not None:
+                    # For bonds with percentage quotation, the Kursliste price is given as a percentage of the nominal value.
+                    # We need to convert it to an absolute price before setting it on the tax value.
+                    self._set_field_value(sec_tax_value, "unitPrice", security_price.percent, path_prefix)
+                    currency = getattr(self._current_kursliste_security, "currency", None)
+                    exchange_rate = security_price.exchangeRate if security_price.exchangeRate and currency and currency != "CHF" else Decimal("1")
+                    value = Decimal("0")
+                    balance = Decimal("0")
+                    if getattr(self._current_kursliste_security, "nominalValue", None) and sec_tax_value.quantity % self._current_kursliste_security.nominalValue == 0:
+                        value = price * sec_tax_value.quantity / self._current_kursliste_security.nominalValue
+                        balance = security_price.taxValue * sec_tax_value.quantity / self._current_kursliste_security.nominalValue if security_price.taxValue and security_price.exchangeRate else value
+                    else:
+                        value = price * sec_tax_value.quantity
+                        balance = security_price.taxValue * sec_tax_value.quantity if security_price.taxValue and security_price.exchangeRate else value
+
+                    self._set_field_value(sec_tax_value, "value", value, path_prefix)
+                    self._set_field_value(sec_tax_value, "balance", balance, path_prefix)
+                    self._set_field_value(sec_tax_value, "exchangeRate", exchange_rate, path_prefix)
+                    self._set_field_value(sec_tax_value, "balanceCurrency", currency or "CHF", path_prefix)
+                    self._set_field_value(sec_tax_value, "kursliste", True, path_prefix)
+                    return
+
+                if price is not None:
                     self._set_field_value(sec_tax_value, "unitPrice", price, path_prefix)
                     value = price * sec_tax_value.quantity
                     self._set_field_value(sec_tax_value, "value", value, path_prefix)
@@ -842,6 +868,11 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
             amount = amount_per_unit * quantity
             chf_amount = chf_per_unit * quantity
+
+            if security.quotationType == "PERCENT" and getattr(kl_sec, "nominalValue", None) and quantity % kl_sec.nominalValue == 0:
+                # For percentage payments on securities with nominal value, the amount per unit is based on the nominal value, not the market price.
+                amount = amount / kl_sec.nominalValue
+                chf_amount = chf_amount / kl_sec.nominalValue
 
             rate = pay.exchangeRate
             if rate is None and pay.paymentValueCHF != 0:
