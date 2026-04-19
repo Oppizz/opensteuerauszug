@@ -127,7 +127,7 @@ def process(
                             filename=str(log_file),
                             filemode="w",
                             encoding="utf-8",
-                            format='%(asctime)s %(name)s %(levelname)s %(message)s',
+                            format='%(name)s %(levelname)s %(message)s',
                             datefmt='%Y-%m-%d %H:%M:%S')
     else:
         logging.basicConfig(level=log_level.value)
