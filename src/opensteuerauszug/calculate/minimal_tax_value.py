@@ -97,7 +97,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
         self._current_security_country = None  # Reset state
 
         if self.summarize_options:
-            self._summarize_positions(tax_statement)
+            self._summarize_options(tax_statement)
 
         if self.remove_offsetting_payments:
             self._remove_offsetting_payments(tax_statement)
@@ -107,7 +107,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
         if self.remove_zero_positions:
             self._remove_zero_positions(tax_statement)      
 
-        if self.summarize_options or self.summarize_options:
+        if self.remove_zero_positions or self.summarize_options:
             self._reorder_pos_idx(tax_statement)
 
         self.logger.info(
@@ -117,19 +117,18 @@ class MinimalTaxValueCalculator(BaseCalculator):
         )
         return tax_statement
     
-    def _summarize_positions(self, tax_statement: TaxStatement):
+    def _summarize_options(self, tax_statement: TaxStatement):
         self.logger.info("Summarizing OPTION positions:")
         if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
-            period_end_plus_one = tax_statement.periodTo + timedelta(days=1)
-            for d in tax_statement.listOfSecurities.depot:
-                original_sec = d.security
-                d.security = []
+            for depot in tax_statement.listOfSecurities.depot:
+                original_sec = depot.security
+                depot.security = []
                 currency_taxvalue_map: Dict[tuple[str, str], tuple[SecurityStock, SecurityTaxValue]] = {}
                 for sec in original_sec:
-                    if sec.securityCategory == "OPTION" and not sec.is_rights_issue and not sec.payment and (not sec.stock or any(s.corpAction for s in sec.stock) == False):
+                    if sec.securityCategory == "OPTION" and not sec.is_rights_issue and not sec.payment and (not sec.stock or any(s.corpAction for s in sec.stock) is False):
                         stock: SecurityStock = None
                         if sec.stock:
-                            stock = next((s for s in sec.stock if s.mutation == False and s.referenceDate == tax_statement.periodFrom), None)
+                            stock = next((s for s in sec.stock if s.mutation is False and s.referenceDate == tax_statement.periodFrom), None)
                         if (sec.taxValue and sec.taxValue.balance) or (stock and stock.balance):
                             currency = sec.taxValue.balanceCurrency if sec.taxValue else stock.balanceCurrency
                             opening_stock, tax_value = currency_taxvalue_map.get((sec.country, currency), (None, None))
@@ -151,8 +150,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                                     quantity=Decimal("1"),
                                     balanceCurrency=tax_value.balanceCurrency,
                                     balance=Decimal("0"),
-                                    unitPrice=Decimal("0"),
-                                    name="Opening balance"
+                                    unitPrice=Decimal("0")
                                 )
                                 
                                 currency_taxvalue_map[(sec.country, currency)] = (opening_stock, tax_value)
@@ -165,9 +163,9 @@ class MinimalTaxValueCalculator(BaseCalculator):
                                 opening_stock.balance += stock.balance
                                 opening_stock.unitPrice = opening_stock.balance
                     else:
-                        d.security.append(sec)
+                        depot.security.append(sec)
 
-                pos_diff = len(original_sec)-len(d.security)
+                pos_diff = len(original_sec)-len(depot.security)
 
                 sec_pos_idx: int = 9900000
                 for (country, currency), (opening_stock, tax_value) in currency_taxvalue_map.items():
@@ -185,10 +183,10 @@ class MinimalTaxValueCalculator(BaseCalculator):
                             taxValue=tax_value,
                             payment=[]
                         )
-                        d.security.append(sec)
+                        depot.security.append(sec)
                         self._removed_sec_identifiers.append(self._get_sec_identifier(sec))   # add the summarized position to the removed list to avoid kursliste warning, even though it's not technically removed
                         sec_pos_idx += 1
-                self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(d.security))}")
+                self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(depot.security))}")
 
     def _remove_offsetting_payments(self, tax_statement: TaxStatement):
         """Remove payments that cancel each other out on the same day."""
@@ -324,8 +322,8 @@ class MinimalTaxValueCalculator(BaseCalculator):
     def _reorder_pos_idx(self, tax_statement: TaxStatement):
         sec_pos_idx = 0
         if tax_statement.listOfSecurities and tax_statement.listOfSecurities.depot:
-            for d in tax_statement.listOfSecurities.depot:
-                for sec in sorted(d.security, key=lambda s: s.positionId or 1):
+            for depot in tax_statement.listOfSecurities.depot:
+                for sec in sorted(depot.security, key=lambda s: s.positionId or 1):
                     sec_pos_idx += 1
                     sec.positionId = sec_pos_idx
 

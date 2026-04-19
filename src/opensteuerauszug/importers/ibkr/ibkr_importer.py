@@ -32,6 +32,7 @@ IBKR_ASSET_CATEGORY_TO_ECH_SECURITY_CATEGORY: Final[Dict[str, SecurityCategory]]
 # Import ibflex components to avoid RuntimeWarning about module loading order
 import ibflex
 from ibflex.parser import FlexParserError
+from ibflex.enums import TradeType
 
 
 class SecurityPositionData(TypedDict):
@@ -110,14 +111,17 @@ class IbkrImporter:
     def _price_apply_multiplier(self, data_object: Any, price: Decimal,
                               object_description: str) -> Decimal:
         """Helper to apply multiplier to quantity."""
-        value = getattr(data_object, "assetCategory", None)
-        multiplier = getattr(data_object, "multiplier", None)
-        price_converted = price
-        if value in ["OPT", "FOP"] and multiplier is not None and multiplier != Decimal("1"):
-            multiplier_dec = self._to_decimal(multiplier, "multiplier", object_description)
-            price_converted = price * multiplier_dec
+        if price:
+            value = getattr(data_object, "assetCategory", None)
+            if value in ["OPT", "FOP"]:
+                multiplier = self._to_decimal(
+                    self._get_required_field(data_object, "multiplier", object_description),
+                    "multiplier",
+                    object_description
+                )
+                return price * multiplier
 
-        return price_converted
+        return price
 
     def _to_decimal(self, value: object | None, field_name: str,
                     object_description: str) -> Decimal:
@@ -650,7 +654,6 @@ class IbkrImporter:
                         self._get_required_field(trade, 'quantity', 'Trade'),
                         'quantity', f"Trade {symbol}"
                     )
-                    
                     trade_price = self._to_decimal(
                         self._get_required_field(trade, 'tradePrice', 'Trade'),
                         'tradePrice', f"Trade {symbol}"
@@ -667,7 +670,9 @@ class IbkrImporter:
                     # 'BUY' or 'SELL'
                     buy_sell = self._get_required_field(trade, 'buySell', 'Trade')
 
-                    transaction_type = getattr(trade, 'transactionType', None)
+                    transaction_type: TradeType = getattr(trade, 'transactionType', None)
+                    expiry_date = getattr(trade, 'expiry', None)
+                    close_price = getattr(trade, 'closePrice', None)
 
                     ib_commission = self._to_decimal(
                         trade.ibCommission if trade.ibCommission is not None else '0',
@@ -714,18 +719,34 @@ class IbkrImporter:
                         "Trade",
                     )
 
+                    unit_price = trade_price if trade_price != Decimal(0) else None
+                    name = get_text(buy_sell.value.lower(), self.render_language) if exists_text(buy_sell.value.lower(), self.render_language) else buy_sell.value
+                    # Trade price is 0 for expired, assigned or exercised options.
+                    if (trade_price == Decimal(0) and asset_category in ["OPT", "FOP"]):
+                        if transaction_type is None:
+                            raise ValueError(f"Transaction type is missing for category {asset_category} with zero price")
+                        if transaction_type == TradeType.BOOKTRADE:
+                            if close_price is None:
+                                raise ValueError(f"Close price is missing for category {asset_category} with zero price")
+                            if close_price == Decimal(0) and (expiry_date is None or expiry_date is not None and expiry_date == trade_date):
+                                # For expired options with zero close price, we can assume they expired worthless. However, we need corresponding OptionEAE entry to be sure. But taxwise it does not matter.
+                                name = get_text('option_expiration', self.render_language)
+                            elif close_price != Decimal(0):
+                                name = get_text('option_assignment', self.render_language)   # can be assignemnt or exercise, but for that we would need to link the trade to the corresponding OptionEAE entry
+                        unit_price = Decimal(0)
+
                     stock_mutation = SecurityStock(
                         referenceDate=trade_date,
                         settleDate=settle_date,
                         mutation=True,
                         quantity=quantity,
-                        unitPrice=trade_price if trade_price != Decimal(0) or asset_category in ["OPT", "FOP"] else None,
-                        name=get_text(buy_sell.value.lower(), self.render_language) if exists_text(buy_sell.value.lower(), self.render_language) else buy_sell.value,
+                        unitPrice=unit_price,
+                        name=name,
                         orderId=trade.ibOrderID,
                         balanceCurrency=currency,
                         quotationType=self._get_security_quote_type(
                             security_quote_type_map, sec_pos, trade, quantity, trade_money, trade_price),
-                        fractional=True if transaction_type and transaction_type.upper() == "FRACSHARE" else None,
+                        fractional=True if transaction_type and transaction_type == TradeType.FRACSHARE else None,
                     )
                     processed_security_positions[sec_pos]['stocks'].append(
                         stock_mutation
@@ -815,10 +836,6 @@ class IbkrImporter:
                     pos_value = None
                     if getattr(open_pos, 'positionValue', None) is not None:
                         pos_value = self._to_decimal(open_pos.positionValue, 'positionValue', f"OpenPosition {symbol}")
-
-                    #if quantity != 0 and asset_category == "BOND" and sub_category and sub_category.upper() == "CORP" and position_country and position_country in ["US", "CA"]:
-                        # For US and CA (and others?) corporate bonds, price is a percentage of nominal value, so we need to adjust the mark price accordingly
-                        #mark_price = pos_value / quantity
 
                     balance_stock = SecurityStock(
                         # Balance as of the period end + 1
@@ -1340,7 +1357,7 @@ class IbkrImporter:
                 opening_balance = start_pos.quantity
             else:
                 tentative_opening = closing_balance - trades_quantity_total
-                opening_balance = tentative_opening if tentative_opening >= 0 else Decimal("0")
+                opening_balance = tentative_opening if tentative_opening >= 0 or asset_cat in ["OPT", "FOP"] else Decimal("0")
 
             if opening_balance < 0 or closing_balance < 0:
                 if (asset_cat == "OPT" or asset_cat == "FOP") and (sub_category == "C" or sub_category == "P"):

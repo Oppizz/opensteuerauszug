@@ -169,5 +169,7 @@ Wertschriftenverzeichnis einzusetzen.''',
     "nominal_value_reduction": "Nennwertreduktion",
     "bank_account_balance": "{account_number} {currency} Guthaben",
     "opening_balance": "Anfangssaldo",
+    "option_expiration": "Optionsverfall",
+    "option_assignment": "Options-Zuweisung/-Ausübung",
 }
 

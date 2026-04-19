@@ -147,4 +147,6 @@ TRANSLATIONS = {
     "nominal_value_reduction": "Réduction de la valeur nominale",
     "bank_account_balance": "Solde {account_number} {currency}",
     "opening_balance": "Solde d'ouverture",
+    "option_expiration": "Expiration d'option",
+    "option_assignment": "Exercice/Attribution d'option",
 }
