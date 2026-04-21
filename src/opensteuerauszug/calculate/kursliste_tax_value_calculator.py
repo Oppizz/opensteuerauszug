@@ -897,6 +897,15 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             amount = amount_per_unit * quantity
             chf_amount = chf_per_unit * quantity
 
+            if amount < Decimal("0") or chf_amount < Decimal("0"):
+                logger.warning(
+                    f"Negative payment amount for {security.isin or security.securityName} on {pay.paymentDate}: {amount} {pay.currency}. "
+                    f"Position: {quantity} on ex-date {pay.exDate}. "
+                    "Please verify this payment manually. Negative dividends are not tax deductible."
+                )
+                amount = Decimal("0")
+                chf_amount = Decimal("0")
+
             if security.quotationType == "PERCENT" and getattr(kl_sec, "nominalValue", None) and quantity % kl_sec.nominalValue == 0:
                 # For percentage payments on securities with nominal value, the amount per unit is based on the nominal value, not the market price.
                 amount = amount / kl_sec.nominalValue
