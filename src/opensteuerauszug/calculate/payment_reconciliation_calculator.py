@@ -35,7 +35,6 @@ class _BrokerAgg:
     allows_broker_above_kursliste: bool = False
     exchange_rate: Optional[Decimal] = None
     wth_correction_late_date: Optional[date] = None
-    short_stock: Optional[bool] = None
 
 @dataclass
 class _KurslisteAgg:
@@ -49,7 +48,7 @@ class _KurslisteAgg:
     original_withholding_chf: Optional[Decimal] = None
     kursliste: Optional[bool] = None
     currency: Optional[str] = None
-
+    short_stock: Optional[bool] = None
 
 class PaymentReconciliationCalculator:
     _COUNTRIES_WHERE_OVERWITHHOLDING_SUGGESTS_CALCULATION_ISSUE = {
@@ -328,7 +327,7 @@ class PaymentReconciliationCalculator:
                             f'W8-BEN. delta={w_diff} CHF.')
                 matched = not (div_diff or w_diff)
                 status = "match" if matched else "mismatch"
-                if broker.short_stock and div_diff < Decimal("0") and not kurs.dividend_chf:
+                if kurs.short_stock and div_diff < Decimal("0") and not kurs.dividend_chf:
                     matched = True
                     status = "expected"
                     note += " Short stock dividend set to 0."
@@ -447,9 +446,6 @@ class PaymentReconciliationCalculator:
             agg.allows_broker_above_kursliste = True
             agg.dividend_capital_gain += payment.amount or Decimal("0")
 
-        if payment.quantity < Decimal("0"):
-            agg.short_stock = True
-
         non_recoverable_original = payment.nonRecoverableTaxAmountOriginal
         withholding_claim = payment.withHoldingTaxClaim
 
@@ -491,6 +487,9 @@ class PaymentReconciliationCalculator:
 
         if self._is_broker_above_kursliste_allowlisted(payment):
             agg.allows_broker_above_kursliste = True
+
+        if payment.quantity < Decimal("0"):
+            agg.short_stock = True
 
         # Detect payments that were already capped by WithholdingCapCalculator.
         if payment.withholding_capped:

@@ -243,22 +243,23 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
             #if pay.paymentType is not None and pay.paymentType != PaymentTypeESTV.STANDARD:
             #    payment_type_original = PaymentTypeOriginal(pay.paymentType.value)
 
-            payment_value: Decimal = pay.amount / quantity
+            amount = pay.amount
+            payment_value: Decimal = amount / quantity
             exchange_rate: Decimal = None
             chf_amount: Decimal = None
             if pay.amountCurrency and pay.amountCurrency != "CHF":
                 if pay.exchangeRate is not None and self.use_broker_exch_rate:
                     exchange_rate = pay.exchangeRate
-                    chf_amount = pay.amount * exchange_rate
+                    chf_amount = amount * exchange_rate
                 else:
                     chf_amount, exchange_rate = self._convert_to_chf(
-                        pay.amount,
+                        amount,
                         pay.amountCurrency,
                         f"{path_prefix}.exchangeRate",
                         pay.paymentDate
                     )
             else:
-                chf_amount = pay.amount
+                chf_amount = amount
                 exchange_rate = Decimal("1")
 
             payment_value_chf = chf_amount / quantity
@@ -267,6 +268,15 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                 raise ValueError(
                     f"Payment on {pay.paymentDate} for {security.isin or security.securityName} missing paymentValueCHF"
                 )
+            
+            if amount < Decimal("0") or chf_amount < Decimal("0"):
+                logger.warning(
+                    f"Negative payment amount for {security.isin or security.securityName} on {pay.paymentDate}: {amount} {pay.currency}. "
+                    f"Position: {quantity} on ex-date {pay.exDate}. "
+                    "Please verify this payment manually. Negative dividends are not tax deductible."
+                )
+                amount = Decimal("0")
+                chf_amount = Decimal("0")
             
             if security.quotationType == "PERCENT" and security.nominalValue and quantity % security.nominalValue == 0:
                 # For percentage payments on securities with nominal value, the amount per unit is based on the nominal value, not the market price.
@@ -290,7 +300,7 @@ class BrokerFillInTaxValueCalculator(KurslisteTaxValueCalculator):
                 quantity=quantity,
                 amountCurrency=pay.amountCurrency,
                 amountPerUnit=payment_value,
-                amount=pay.amount,
+                amount=amount,
                 exchangeRate=rate,
                 payment_type_original=payment_type_original,
             )
