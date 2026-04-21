@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from datetime import date
 from typing import Optional, List, Set, get_args
 import logging
 
@@ -646,6 +647,12 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
 
         result: List[SecurityPayment] = []
 
+        # Track variant numbers seen per event key so we can detect payments that
+        # represent an OR-choice (e.g. cash dividend vs. stock dividend). The check
+        # is woven into the main loop so it only considers payments that are
+        # actually processed (respecting the paymentDate and capitalGain filters).
+        variants_by_event: dict[date, set[int]] = {}
+
         stock = list(security.stock)
         if security.taxValue:
             stock.append(security_tax_value_to_stock(security.taxValue))
@@ -681,6 +688,21 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 reconciliation_date = pay.paymentDate
             else:
                 reconciliation_date = pay.exDate or pay.paymentDate
+
+            # The variant attribute marks an OR-choice between mutually exclusive
+            # payment alternatives (e.g. cash dividend vs. stock dividend). If we
+            # encounter more than one distinct variant for the same event, there
+            # is no mechanical way to choose — surface this to the user.
+            if pay.variant is not None:
+                seen = variants_by_event.setdefault(reconciliation_date, set())
+                seen.add(pay.variant)
+                if len(seen) > 1:
+                    sec_ident = security.isin or security.securityName
+                    #raise NotImplementedError(
+                    logger.warning(
+                        f"Payment on {reconciliation_date} for '{sec_ident}' has multiple variants "
+                        f"({sorted(seen)}). Manual selection of a variant is required."
+                    )
 
             # Warn if exDate is in the previous year (before the tax period)
             if not isinstance(pay, PaymentBond) and pay.exDate and security.taxValue and security.taxValue.referenceDate:
@@ -770,7 +792,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                                     )
                                     keep = abs(chf_amount - pay.paymentValueCHF * quantity) <= Decimal("0.01")
                                     if keep:
-                                        payment_name_broker = "Dividende"
+                                        payment_name_broker = self._translate("dividend")
                                     break
                         #legends = getattr(pay, "legend", [])
                         if keep is None: #and any(legend for legend in legends if hasattr(legend, "text") and any(t for t in legend.text if "wahlweise" in t.value.lower() and "dividende in aktien" in t.value.lower()))
