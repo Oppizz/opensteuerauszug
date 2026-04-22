@@ -901,7 +901,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 logger.warning(
                     f"Negative payment amount for {security.isin or security.securityName} on {pay.paymentDate}: {amount} {pay.currency}. "
                     f"Position: {quantity} on record date {pay.exDate-timedelta(days=1)}. "
-                    "Please verify this payment manually. Negative dividends are not tax deductible."
+                    "Please verify this payment manually. Negative dividends are not tax-deductible."
                 )
                 amount = Decimal("0")
                 chf_amount = Decimal("0")

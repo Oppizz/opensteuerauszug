@@ -50,6 +50,7 @@ class _KurslisteAgg:
     currency: Optional[str] = None
     short_stock: Optional[bool] = None
 
+
 class PaymentReconciliationCalculator:
     _COUNTRIES_WHERE_OVERWITHHOLDING_SUGGESTS_CALCULATION_ISSUE = {
         "GB",  # United Kingdom (0% WHT)
@@ -331,8 +332,6 @@ class PaymentReconciliationCalculator:
                     matched = True
                     status = "expected"
                     note += " Short stock dividend set to 0."
-            #elif not has_kurs and has_broker and broker.allows_broker_above_kursliste:
-            #    skip = True
             elif not has_kurs and has_broker:
                 note = "Broker paym has no Kursliste entry."
                 if broker.allows_broker_above_kursliste:
