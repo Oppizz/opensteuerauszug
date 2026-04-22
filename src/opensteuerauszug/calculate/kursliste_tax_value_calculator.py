@@ -897,7 +897,7 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
             amount = amount_per_unit * quantity
             chf_amount = chf_per_unit * quantity
 
-            if amount < Decimal("0") or chf_amount < Decimal("0"):
+            if quantity < Decimal("0") and (amount < Decimal("0") or chf_amount < Decimal("0")):
                 logger.warning(
                     f"Negative payment amount for {security.isin or security.securityName} on {pay.paymentDate}: {amount} {pay.currency}. "
                     f"Position: {quantity} on record date {pay.exDate-timedelta(days=1)}. "
