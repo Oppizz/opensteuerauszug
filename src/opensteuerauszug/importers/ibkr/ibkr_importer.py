@@ -316,6 +316,7 @@ class IbkrImporter:
             valor=None,
             isin=ISINType(isin_attr) if isin_attr else None,
             symbol=str(security_id),
+            ticker=symbol_attr,
             description=(
                 f"{description} ({symbol_attr})" if symbol_attr else description
             ),
@@ -600,11 +601,12 @@ class IbkrImporter:
                         valor=valor,
                         isin=ISINType(isin) if isin else None,
                         symbol=conid,
+                        ticker=symbol,
                         description=f"{description} ({symbol})"
                     )
 
                     # Update name metadata (Priority: 8 for Trades)
-                    security_name_registry.update(sec_pos, description, 8, symbol)
+                    security_name_registry.update(sec_pos, f"{description} ({symbol})" if description != symbol else description, 8)
 
                     # Store assetCategory and subCategory
                     sub_category = getattr(trade, 'subCategory', None)
@@ -710,11 +712,12 @@ class IbkrImporter:
                         valor=valor,
                         isin=ISINType(isin) if isin else None,
                         symbol=conid,
+                        ticker=symbol,
                         description=f"{description} ({symbol})"
                     )
 
                     # Update name metadata (Priority: 10 for OpenPositions)
-                    security_name_registry.update(sec_pos, description, 10, symbol)
+                    security_name_registry.update(sec_pos, f"{description} ({symbol})" if description != symbol else description, 10)
 
                     # Store assetCategory and subCategory
                     sub_category = getattr(open_pos, 'subCategory', None)
@@ -818,11 +821,12 @@ class IbkrImporter:
                         valor=None,
                         isin=ISINType(isin) if isin else None,
                         symbol=conid,
+                        ticker=symbol,
                         description=f"{description} ({symbol})",
                     )
 
                     # Update name metadata (Priority: 5 for Transfers)
-                    security_name_registry.update(sec_pos, description, 5, symbol)
+                    security_name_registry.update(sec_pos, f"{description} ({symbol})", 5)
 
                     stock_mutation = SecurityStock(
                         referenceDate=tx_date,
@@ -891,6 +895,7 @@ class IbkrImporter:
                             valor=None,
                             isin=ISINType(isin) if isin else None,
                             symbol=conid,
+                            ticker=symbol,
                             description=f"{description} ({symbol})",
                         )
 
@@ -917,21 +922,20 @@ class IbkrImporter:
                     # - Description > 50 chars: -1 (Don't use if possible, prefer symbol if nothing else)
 
                     issuer = getattr(action, "issuer", None)
-                    #ca_name = f"{description} ({symbol})"
+                    ca_name = f"{description} ({symbol})" if description != symbol else description
                     ca_priority = 1
 
                     if issuer:
-                        ca_name = issuer
+                        ca_name = f"{issuer} ({symbol})"
                         ca_priority = 4
                     elif len(description) > 50:
                         # Long description and no issuer. Prefer symbol (short name).
                         ca_name = symbol
                         ca_priority = 2
                     else:
-                        ca_name = description
                         ca_priority = 3
 
-                    security_name_registry.update(sec_pos, ca_name, ca_priority, symbol)
+                    security_name_registry.update(sec_pos, ca_name, ca_priority)
 
                     sub_category = getattr(action, "subCategory", None)
                     if sub_category == "RIGHT":
@@ -1055,9 +1059,8 @@ class IbkrImporter:
                         # But if it's the only source, it's better than nothing.
                         security_name_registry.update(
                             sec_pos_key,
-                            description, 
-                            0, 
-                            sym_attr
+                            f"{description} ({sym_attr})" if sym_attr else description,
+                            0
                         )
 
                         sec_payment = self._build_security_payment(
@@ -1329,7 +1332,6 @@ class IbkrImporter:
 
             # Determine best security name (registry falls back to description, then symbol)
             final_security_name = security_name_registry.resolve(sec_pos_obj)
-            ticker = security_name_registry.ticker(sec_pos_obj)
 
             country = security_country_map.get(sec_pos_obj, None)
             if country == "XX" and sec_pos_obj.isin and len(sec_pos_obj.isin) >= 2:
@@ -1350,7 +1352,7 @@ class IbkrImporter:
                 country=country,
                 stock=sorted_stocks,
                 payment=sorted_payments,
-                symbol=ticker,
+                symbol=sec_pos_obj.ticker,
                 nominalValue=Decimal("1000") if primary_quotation_type == "PERCENT" and asset_cat == "BOND" and country in ["US", "CA"] else None,
             )
 
@@ -1359,7 +1361,7 @@ class IbkrImporter:
 
             depot_securities_map[sec_pos_obj.depot].append(sec)
 
-            if is_rights_issue and opening_balance == 0 and closing_balance == 0 and sec.country=="CH" and sec.payment and len(sec.payment) > 0 and (sec.stock == None or sum(1 for s in sec.stock if s.corpAction in (None, False)) <= 1):
+            if is_rights_issue and opening_balance == 0 and closing_balance == 0 and sec.country=="CH" and sec.payment and len(sec.payment) > 0 and (sec.stock is None or sum(1 for s in sec.stock if s.corpAction in (None, False)) <= 1):
                 rights_issue_cleanup_map[sec_pos_obj.depot].append(sec)
 
         # reassign payments for rights issues to original security positions if they were assigned to a separate position based on the description in the cash transaction. 

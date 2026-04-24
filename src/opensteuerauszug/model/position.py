@@ -63,6 +63,7 @@ class SecurityPosition(BasePosition):
     valor: Optional[ValorNumber] = None
     isin: Optional[ISINType] = Field(default=None, pattern=r"[A-Z]{2}[A-Z0-9]{9}[0-9]{1}")
     symbol: str
+    ticker: Optional[str] = Field(default=None, description="Optional ticker symbol if symbol attribute is used for a non-ticker identifier (IBKR)")
     security_type: Optional[str] = Field(default=None, alias="securityType", description="Type of security, if available")
     description: Optional[str] = Field(default=None, description="Description of the security from the import file")
     _identifier_str: Optional[str] = PrivateAttr(default=None)
@@ -72,7 +73,7 @@ class SecurityPosition(BasePosition):
 
     def get_processing_identifier(self) -> str:
         if self._identifier_str is None:
-            self._identifier_str = f"{self.depot}-{self.symbol}--{self.isin if self.isin else self.description}"
+            self._identifier_str = f"{self.depot}-{self.ticker if self.ticker else self.symbol}--{self.isin if self.isin else self.description}"
         return self._identifier_str
 
     def get_balance_name_prefix(self) -> str:

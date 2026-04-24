@@ -35,20 +35,15 @@ class SecurityNameRegistry:
 
     def __init__(self) -> None:
         self._entries: defaultdict[SecurityPosition, SecurityNameMetadata] = defaultdict(
-            lambda: {"best_name": None, "priority": -1, "ticker": None}
+            lambda: {"best_name": None, "priority": -1}
         )
 
-    def update(self, position: SecurityPosition, name: str, priority: int, ticker: str = None) -> None:
+    def update(self, position: SecurityPosition, name: str, priority: int) -> None:
         """Record *name* for *position* if *priority* beats the current best."""
         entry = self._entries[position]
         if priority > entry["priority"]:
-            name_symbol = name
-            if ticker and name != ticker:
-                name_symbol = f"{name} ({ticker})"
-            entry['best_name'] = name_symbol
+            entry["best_name"] = name
             entry["priority"] = priority
-        if entry and not entry["ticker"] and ticker:
-            entry["ticker"] = ticker
 
     def best(self, position: SecurityPosition) -> str | None:
         """Return the best name recorded so far, or ``None`` if none."""
@@ -61,14 +56,7 @@ class SecurityNameRegistry:
             return name
         if position.description:
             return position.description
-        ticker = self.ticker(position)
-        if ticker:
-            return ticker
         return position.symbol
-    
-    def ticker(self, position: SecurityPosition) -> str | None:
-        """Return the ticker symbol for the position, if available."""
-        return self._entries[position]["ticker"]
 
     def __contains__(self, position: SecurityPosition) -> bool:
         return position in self._entries
