@@ -125,7 +125,13 @@ class MinimalTaxValueCalculator(BaseCalculator):
                 depot.security = []
                 currency_taxvalue_map: Dict[tuple[str, str], tuple[SecurityStock, SecurityTaxValue]] = {}
                 for sec in original_sec:
-                    if sec.securityCategory == "OPTION" and not sec.is_rights_issue and not sec.payment and (not sec.stock or any(s.corpAction for s in sec.stock) is False):
+                    if (sec.securityCategory == "OPTION" and 
+                        not sec.valorNumber and
+                        not sec.isin and
+                        not sec.is_rights_issue and 
+                        not sec.payment and 
+                        (not sec.stock or any(s.corpAction for s in sec.stock) is False)
+                    ):
                         stock: SecurityStock = None
                         if sec.stock:
                             stock = next((s for s in sec.stock if s.mutation is False and s.referenceDate == tax_statement.periodFrom), None)
@@ -186,7 +192,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                         depot.security.append(sec)
                         self._removed_sec_identifiers.append(self._get_sec_identifier(sec))   # add the summarized position to the removed list to avoid kursliste warning, even though it's not technically removed
                         sec_pos_idx += 1
-                self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(depot.security))}")
+                    self.logger.info(f"  - Summarized {pos_diff} positions into {pos_diff-(len(original_sec)-len(depot.security))} for {country}/{currency}")
 
     def _remove_offsetting_payments(self, tax_statement: TaxStatement):
         """Remove payments that cancel each other out on the same day."""

@@ -125,14 +125,6 @@ class KurslisteTaxValueCalculator(MinimalTaxValueCalculator):
                 self._all_securities.extend(depot.security)
         result = super().calculate(tax_statement)
 
-        """
-        if tax_statement.listOfSecurities:
-            for depot in tax_statement.listOfSecurities.depot:
-                for security in depot.security:
-                    # update security currency if there's a tax value, otherwise tax software shows wrong values
-                    if security.taxValue and security.taxValue.balanceCurrency and security.taxValue.balanceCurrency != security.currency:
-                        self._set_field_value(security, "currency", security.taxValue.balanceCurrency, "")
-        """
         if self._missing_kursliste_entries:
             logger.warning("Missing Kursliste entries for securities:")
             for entry in self._missing_kursliste_entries:
