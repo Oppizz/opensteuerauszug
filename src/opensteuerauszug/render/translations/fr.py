@@ -137,6 +137,7 @@ TRANSLATIONS = {
     "credit_interest_syep": "Intérêts créditeurs du prêt de titres (SYEP)",
     "dividend": "Dividende",
     "stock_split": "Fractionnement d'actions",
+    "reverse_stock_split": "Regroupement d'actions",
     "distribution": "Distribution",
     "stock_dividend": "Dividende en actions",
     "other_monetary_benefits": "Autres avantages monétaires",
@@ -149,4 +150,5 @@ TRANSLATIONS = {
     "opening_balance": "Solde d'ouverture",
     "option_expiration": "Expiration d'option",
     "option_assignment": "Exercice/Attribution d'option",
+    "transfer": "Transfert de titres",
 }
