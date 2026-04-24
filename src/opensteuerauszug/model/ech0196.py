@@ -1170,8 +1170,7 @@ class SecurityPayment(BaseXmlModel):
     reportDate: Optional[date] = Field(default=None, exclude=True)
     brokerActionId: Optional[str] = Field(default=None, exclude=True)
     remark: List[Remark] = Field(default=None, exclude=True)
-    # broker amount in CHF
-    amount_CHF: Optional[Decimal] = Field(default=None, exclude=True)
+    brokerAmountCHF: Optional[Decimal] = Field(default=None, exclude=True)
     
     model_config = {
         "json_schema_extra": {'tag_name': 'payment', 'tag_namespace': NS_MAP['eCH-0196']}
@@ -1295,7 +1294,7 @@ class Security(BaseXmlModel):
     def get_payment_and_broker_nontaxable(self) -> List[SecurityPayment]:
         payment_list: List[SecurityPayment] = self.payment or []
         if self.broker_payments:
-            broker_nontaxaple_payment = list(p for p in self.broker_payments if p.sign and p.sign in NON_TAXABLE_SIGNS and p.amount_CHF and p.amountCurrency and p.paymentDate)
+            broker_nontaxaple_payment = list(p for p in self.broker_payments if p.sign and p.sign in NON_TAXABLE_SIGNS and p.brokerAmountCHF and p.amountCurrency and p.paymentDate)
             if broker_nontaxaple_payment and len(broker_nontaxaple_payment)>0:
                 payment_list = [payment.model_copy(deep=True) for payment in payment_list]
                 payment_list.extend(broker_nontaxaple_payment)

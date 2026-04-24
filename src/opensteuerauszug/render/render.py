@@ -2202,8 +2202,8 @@ def create_currency_summary_table(tax_statement: TaxStatement, styles, usable_wi
                             wthAmount_CHF: Decimal = Decimal('0')
                             capital_return_CHF: Decimal = Decimal('0')
                             
-                            if payment.sign and payment.sign in NON_TAXABLE_SIGNS and payment.amount_CHF:
-                                capital_return_CHF = payment.amount_CHF if payment.amount_CHF else Decimal('0')
+                            if payment.sign and payment.sign in NON_TAXABLE_SIGNS and payment.brokerAmountCHF:
+                                capital_return_CHF = payment.brokerAmountCHF if payment.brokerAmountCHF else Decimal('0')
                                 revenue = Decimal('0')
                             else:
                                 if getattr(payment, 'grossRevenueA', None):

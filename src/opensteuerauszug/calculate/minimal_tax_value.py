@@ -458,7 +458,7 @@ class MinimalTaxValueCalculator(BaseCalculator):
                 if not getattr(pay, "exchangeRate", None) and pay.amountCurrency and pay.paymentDate:
                     pay.exchangeRate = self.exchange_rate_provider.get_exchange_rate(pay.amountCurrency, pay.paymentDate, path_prefix + ".exchangeRate")
                 if pay.exchangeRate and pay.amount:
-                    pay.amount_CHF = pay.amount*pay.exchangeRate
+                    pay.brokerAmountCHF = pay.amount*pay.exchangeRate
 
         # BaseCalculator does not have a _handle_Security method.
 
