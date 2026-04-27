@@ -23,7 +23,6 @@ from opensteuerauszug.model.ech0196 import (
     BankAccountName,
     CountryIdISO2Type
 )
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
 
 DEFAULT_TEST_PERIOD_FROM = date(2023, 1, 1)
 DEFAULT_TEST_PERIOD_TO = date(2023, 12, 31)
@@ -989,7 +988,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
 
         payment_date = date(2023, 7, 15)
         # Ensure exDate is None to test paymentDate fallback
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendPaymentDateFallback")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendPaymentDateFallback")
         payment_event.exDate = None
         security.payment = [payment_event]
 
@@ -1012,7 +1011,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
 
         payment_date = date(2023, 8, 1)
         # Ensure exDate is None
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendPaymentDateFallbackNoStock")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendPaymentDateFallbackNoStock")
         payment_event.exDate = None
         security.payment = [payment_event]
 
@@ -1034,7 +1033,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
 
         payment_date = date(2023, 9, 1)
         # Ensure exDate is None
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendPaymentDateFallbackMissingStock")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendPaymentDateFallbackMissingStock")
         payment_event.exDate = None
         security.payment = [payment_event]
 
@@ -1051,14 +1050,14 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         assert "Missing stock data (Security.stock is None or empty)" in error_message
         assert f"for security '{security.isin}'" in error_message
         assert "which has payments requiring quantity calculation" in error_message
-        assert security.payment[0].quantity == UNINITIALIZED_QUANTITY
+        assert security.payment[0].quantity is None
 
     def test_calculate_quantity_paymentdate_fallback_stock_data_does_not_cover(self, sample_period_from, sample_period_to):
         statement, security = self._create_base_statement_and_security(sample_period_from, sample_period_to, security_name="SecPaymentDateFallbackNoCover")
 
         payment_date = date(2023, 6, 15) # Payment date
         # Ensure exDate is None
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendPaymentDateFallbackNoCover")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendPaymentDateFallbackNoCover")
         payment_event.exDate = None
         security.payment = [payment_event]
 
@@ -1091,7 +1090,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         payment_date = date(2023, 7, 15)
         ex_date = date(2023, 7, 1) # exDate is before paymentDate
 
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendExDatePriority")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendExDatePriority")
         payment_event.exDate = ex_date
         security.payment = [payment_event]
 
@@ -1116,7 +1115,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         payment_date = date(2023, 7, 15)
         ex_date = date(2023, 7, 1)
 
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendExDateNoStock")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendExDateNoStock")
         payment_event.exDate = ex_date
         security.payment = [payment_event]
 
@@ -1139,7 +1138,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         payment_date = date(2023, 7, 15)
         ex_date = date(2023, 7, 1)
 
-        payment_event = create_security_payment(payment_date=payment_date, quantity=UNINITIALIZED_QUANTITY, name="DividendExDateInsufficient")
+        payment_event = create_security_payment(payment_date=payment_date, quantity=None, name="DividendExDateInsufficient")
         payment_event.exDate = ex_date
         security.payment = [payment_event]
 
@@ -1162,7 +1161,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         )
         payment_event = create_security_payment(
             payment_date=date(2023, 6, 1),
-            quantity=UNINITIALIZED_QUANTITY, # Needs calculation
+            quantity=None, # Needs calculation
             name="DividendMissingStockOverall"
         )
         security.payment = [payment_event]
@@ -1177,7 +1176,7 @@ class TestCleanupCalculatorSecurityPaymentQuantity:
         assert "Missing stock data (Security.stock is None or empty)" in error_message
         assert f"for security '{security.isin}'" in error_message # Check for actual name
         assert "which has payments requiring quantity calculation" in error_message
-        assert security.payment[0].quantity == UNINITIALIZED_QUANTITY
+        assert security.payment[0].quantity is None
 
 
 class TestMoveNegativePaymentsToLiabilities:
@@ -2707,3 +2706,81 @@ class TestCleanupCalculatorClosingBalanceQuantity:
         assert result_security.taxValue is not None
         assert result_security.taxValue.quantity == Decimal("0.001")
 
+
+class TestCleanupCalculatorNegativeBalanceWarnings:
+    """Sanity-check warnings for negative security balances.
+
+    Importers stay unopinionated and surface short positions as-is; the
+    cleanup stage is the single place that flags them.
+    """
+
+    def _build_statement(self, security: Security, period_from: date, period_to: date) -> TaxStatement:
+        depot = Depot(depotNumber=DepotNumber("D1"), security=[security])
+        return TaxStatement(
+            id=None,
+            creationDate=datetime(period_to.year, 1, 1),
+            taxPeriod=period_to.year,
+            periodFrom=period_from,
+            periodTo=period_to,
+            country="CH",
+            canton="ZH",
+            minorVersion=0,
+            client=[Client(clientNumber=ClientNumber("ShortClient"))],
+            institution=Institution(lei=LEIType("SHORTLEI1234500000000")),
+            listOfSecurities=ListOfSecurities(depot=[depot]),
+        )
+
+    def test_negative_share_balance_raises_with_issue_309(self, sample_period_from, sample_period_to, caplog):
+        closing_balance_date = sample_period_to + timedelta(days=1)
+        sell = create_security_stock(date(2023, 6, 1), Decimal("-5"), mutation=True, name="Short Sell")
+        closing = create_security_stock(closing_balance_date, Decimal("-5"), mutation=False, name="Closing")
+        security = Security(
+            positionId=1, country="US", currency="USD", quotationType="PIECE",
+            securityCategory="SHARE", securityName="ShortShare",
+            stock=[sell, closing],
+        )
+        statement = self._build_statement(security, sample_period_from, sample_period_to)
+        calculator = CleanupCalculator(sample_period_from, sample_period_to, "ShortImporter", enable_filtering=False)
+
+        with caplog.at_level("WARNING"), pytest.raises(ValueError, match="issues/309"):
+            calculator.calculate(statement)
+
+        assert "Negative balance" in caplog.text
+        assert "issues/309" in caplog.text
+        assert "issues/261" not in caplog.text
+
+    def test_negative_option_balance_raises_with_issue_261(self, sample_period_from, sample_period_to, caplog):
+        closing_balance_date = sample_period_to + timedelta(days=1)
+        sell = create_security_stock(date(2023, 6, 1), Decimal("-1"), mutation=True, name="Write Call")
+        closing = create_security_stock(closing_balance_date, Decimal("-1"), mutation=False, name="Closing")
+        security = Security(
+            positionId=1, country="US", currency="USD", quotationType="PIECE",
+            securityCategory="OPTION", securityName="ShortCall",
+            stock=[sell, closing],
+        )
+        statement = self._build_statement(security, sample_period_from, sample_period_to)
+        calculator = CleanupCalculator(sample_period_from, sample_period_to, "ShortImporter", enable_filtering=False)
+
+        with caplog.at_level("WARNING"), pytest.raises(ValueError, match="issues/261"):
+            calculator.calculate(statement)
+
+        assert "Negative balance" in caplog.text
+        assert "issues/261" in caplog.text
+        assert "issues/309" not in caplog.text
+
+    def test_positive_balance_does_not_warn(self, sample_period_from, sample_period_to, caplog):
+        closing_balance_date = sample_period_to + timedelta(days=1)
+        buy = create_security_stock(date(2023, 6, 1), Decimal("10"), mutation=True, name="Buy")
+        closing = create_security_stock(closing_balance_date, Decimal("10"), mutation=False, name="Closing")
+        security = Security(
+            positionId=1, country="US", currency="USD", quotationType="PIECE",
+            securityCategory="SHARE", securityName="LongShare",
+            stock=[buy, closing],
+        )
+        statement = self._build_statement(security, sample_period_from, sample_period_to)
+        calculator = CleanupCalculator(sample_period_from, sample_period_to, "LongImporter", enable_filtering=False)
+
+        with caplog.at_level("WARNING"):
+            calculator.calculate(statement)
+
+        assert "Negative balance" not in caplog.text

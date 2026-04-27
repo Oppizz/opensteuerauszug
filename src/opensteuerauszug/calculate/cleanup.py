@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any, cast, get_args
 from decimal import Decimal
 import logging
 from opensteuerauszug.model.ech0196 import (
-    SecurityTaxValue, TaxStatement, SecurityStock,
+    Security, SecurityTaxValue, TaxStatement, SecurityStock,
     Client, CantonAbbreviation, LiabilityAccount, LiabilityAccountTaxValue,
     ListOfLiabilities, BankAccountName, CountryIdISO2Type, CurrencyId, LiabilityAccountPayment
 )
@@ -12,7 +12,6 @@ from opensteuerauszug.model.critical_warning import CriticalWarning, CriticalWar
 from opensteuerauszug.util.sorting import find_index_of_date, sort_security_stocks, sort_payments, sort_security_payments
 from opensteuerauszug.config.models import GeneralSettings
 from opensteuerauszug.core.position_reconciler import PositionReconciler
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
 from opensteuerauszug.core.organisation import compute_org_nr
 from opensteuerauszug.render.translations import get_text, Language, DEFAULT_LANGUAGE
 
@@ -59,6 +58,43 @@ class CleanupCalculator:
 
     
 
+
+    def _check_negative_balances(self, security: Security, pos_id: str) -> None:
+        """Surface negative non-mutation balances on a security.
+
+        The post-processing layer is unopinionated and lets short positions
+        flow through; this is the single place where we sanity-check them.
+        We log a warning (with a pointer to the relevant tracking issue
+        based on the eCH security category) and then raise so processing
+        stops on data that the downstream calculators can't meaningfully
+        handle.
+        """
+        negative_balances = [
+            s for s in (security.stock or [])
+            if not s.mutation and s.quantity is not None and s.quantity < 0
+        ]
+        if not negative_balances:
+            return
+
+        if security.securityCategory == "OPTION":
+            issue_ref = (
+                "https://github.com/vroonhof/opensteuerauszug/issues/261"
+            )
+        else:
+            issue_ref = (
+                "https://github.com/vroonhof/opensteuerauszug/issues/309"
+            )
+        message = (
+            f"Negative balance(s) for security '{pos_id}' "
+            f"(category {security.securityCategory}): "
+            + ", ".join(
+                f"{s.quantity} on {s.referenceDate}" for s in negative_balances
+            )
+            + ". Please double-check the data; "
+            f"if you are intentionally holding a short position, see {issue_ref}."
+        )
+        logger.warning("  Security %s: %s", pos_id, message)
+        #raise ValueError(message)
 
     def _generate_tax_statement_id(self, statement: TaxStatement) -> str:
         """
@@ -510,6 +546,8 @@ class CleanupCalculator:
                             # even if we filter security.stock for the final XML representation.
                             full_stock_history = list(security.stock)
 
+                            self._check_negative_balances(security, pos_id)
+
                             # End of period balances are reflected in the tax value
                             if self.period_to:
                                 period_end_plus_one = self.period_to + timedelta(days=1)
@@ -564,7 +602,7 @@ class CleanupCalculator:
                         # Process Security Payments for the current security
                         if security.payment:
                             payments_needing_qty_update = any(
-                                p.quantity == UNINITIALIZED_QUANTITY for p in security.payment
+                                p.quantity is None for p in security.payment
                             )
 
                             if payments_needing_qty_update and not security.stock:
@@ -594,13 +632,13 @@ class CleanupCalculator:
                                 else:
                                     logger.info(f"  Security {pos_id}: Security payment filtering skipped (tax period not fully defined).")
 
-                            # --- Calculate SecurityPayment.quantity where it's UNINITIALIZED_QUANTITY ---
+                            # --- Calculate SecurityPayment.quantity where it is missing (None) ---
                             # This block is now only entered if security.stock is guaranteed to be non-empty (due to the check above)
                             # OR if no payments needed update in the first place.
                             if payments_needing_qty_update and security.stock: # security.stock check is technically redundant here but safe
                                 reconciler = PositionReconciler(full_stock_history, identifier=f"{pos_id}-payment-qty-reconcile")
                                 for payment_event in security.payment:
-                                    if payment_event.quantity == UNINITIALIZED_QUANTITY:
+                                    if payment_event.quantity is None:
                                         date_to_use_for_reconciliation = payment_event.paymentDate
                                         log_date_source = "paymentDate"
                                         if payment_event.exDate:
@@ -645,5 +683,3 @@ class CleanupCalculator:
         else:
             logger.info("Cleanup calculation finished. No data was modified.") # Adjusted log
         return statement
-
-

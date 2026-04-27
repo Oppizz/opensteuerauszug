@@ -14,7 +14,6 @@ from opensteuerauszug.config.models import IbkrAccountSettings
 from opensteuerauszug.model.ech0196 import (
     Client,
 )
-from opensteuerauszug.core.constants import UNINITIALIZED_QUANTITY
 
 # Check if ibflex is available, skip tests if not
 try:
@@ -519,8 +518,8 @@ def test_ibkr_import_skips_hyphen_account_entries(sample_ibkr_settings):
             os.remove(xml_file_path)
 
 
-def test_security_payment_quantity_is_minus_one(sample_ibkr_settings):
-    """Test that SecurityPayment.quantity is set to -1 for payments derived from CashTransactions."""
+def test_security_payment_quantity_is_none_before_cleanup(sample_ibkr_settings):
+    """Test that SecurityPayment.quantity is None for payments derived from CashTransactions (set by cleanup)."""
     period_from = date(2023, 1, 1)
     period_to = date(2023, 12, 31)
 
@@ -575,9 +574,9 @@ def test_security_payment_quantity_is_minus_one(sample_ibkr_settings):
 
         for payment in msft_security.payment:
             if payment.name == "MSFT Corp Dividend":
-                assert payment.quantity == UNINITIALIZED_QUANTITY, f"Dividend payment quantity for {payment.name} should be UNINITIALIZED_QUANTITY"
+                assert payment.quantity is None, f"Dividend payment quantity for {payment.name} should be None before cleanup"
             elif payment.name == "Tax on MSFT Dividend":
-                assert payment.quantity == UNINITIALIZED_QUANTITY, f"Tax payment quantity for {payment.name} should be UNINITIALIZED_QUANTITY"
+                assert payment.quantity is None, f"Tax payment quantity for {payment.name} should be None before cleanup"
                 assert payment.nonRecoverableTax is None
                 assert payment.nonRecoverableTaxAmountOriginal == Decimal("1.85")
                 assert payment.broker_label_original == "Withholding Tax"
@@ -2472,9 +2471,12 @@ SAMPLE_IBKR_FLEX_XML_SHORT_POSITION = """
 """
 
 
-def test_short_stock_position_negative_balance_raises(sample_ibkr_settings):
+def test_short_stock_position_propagates_negative_balance(sample_ibkr_settings):
     """
-    A short stock position (negative OpenPosition) must raise a ValueError.
+    A short stock position (negative OpenPosition) is propagated as-is.
+    The IBKR importer is unopinionated: it surfaces whatever the Flex
+    report contains. Sanity-checking now lives in
+    :class:`CleanupCalculator` which logs a warning rather than raising.
     """
     period_from = date(2025, 1, 1)
     period_to = date(2025, 12, 31)
@@ -2490,11 +2492,24 @@ def test_short_stock_position_negative_balance_raises(sample_ibkr_settings):
         xml_file_path = tmp_file.name
 
     try:
-        with pytest.raises(ValueError, match="Negative balance computed"):
-            importer.import_files([xml_file_path])
+        statement = importer.import_files([xml_file_path])
     finally:
         if os.path.exists(xml_file_path):
             os.remove(xml_file_path)
+
+    assert statement.listOfSecurities is not None
+    securities = [
+        sec
+        for depot in statement.listOfSecurities.depot
+        for sec in depot.security
+    ]
+    aapl = next(sec for sec in securities if sec.isin == "US0378331005")
+    closing_balances = [
+        s.quantity
+        for s in aapl.stock
+        if not s.mutation and s.referenceDate == date(2026, 1, 1)
+    ]
+    assert closing_balances == [Decimal("-5")]
 
 
 # OPT/C call-spread: both legs expire/close intra-year (2025-01-22, expiry 2025-01-24).

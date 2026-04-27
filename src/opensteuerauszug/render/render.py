@@ -1805,7 +1805,15 @@ def create_securities_table(tax_statement: TaxStatement, styles, usable_width, s
             if getattr(security, 'payment', None):
                 for payment in security.payment:
                     entries.append(('payment', payment.paymentDate or payment.exDate, 1, payment))
-                    precision = max(precision, find_minimal_decimals(payment.quantity))
+                    if payment.quantity is None:
+                        raise ValueError(
+                            f"Payment '{payment.name}' has quantity=None at render time; "
+                            "run validate_model() before rendering to catch missing required fields."
+                        )
+                    precision = max(
+                        precision,
+                        find_minimal_decimals(payment.quantity),
+                    )
                     if payment.amountPerUnit:
                         price_digits = max(price_digits, find_minimal_decimals(round_accounting(payment.amountPerUnit)))
             if getattr(security, 'stock', None):
