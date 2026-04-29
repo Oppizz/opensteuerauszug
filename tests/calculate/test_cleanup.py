@@ -10,7 +10,7 @@ from opensteuerauszug.model.ech0196 import (
     ListOfBankAccounts, BankAccount, BankAccountPayment, BankAccountNumber,
     BankAccountTaxValue,
     ListOfSecurities, Depot, Security, SecurityStock, SecurityPayment, DepotNumber,
-    CurrencyId, QuotationType,
+    QuotationType,
     ValorNumber,
     Institution,
     Client,
@@ -20,8 +20,7 @@ from opensteuerauszug.model.ech0196 import (
     LiabilityAccount,
     LiabilityAccountTaxValue,
     ListOfLiabilities,
-    BankAccountName,
-    CountryIdISO2Type
+    BankAccountName
 )
 
 DEFAULT_TEST_PERIOD_FROM = date(2023, 1, 1)
@@ -40,7 +39,7 @@ def create_security_stock(
     quantity: Decimal,
     mutation: bool,
     name: str = "Stock Event",
-    balance_currency: CurrencyId = "CHF",
+    balance_currency: str = "CHF",
     quotation_type: QuotationType = "PIECE"
 ) -> SecurityStock:
     return SecurityStock(
@@ -56,7 +55,7 @@ def create_security_payment(
     payment_date: date,
     quantity: Decimal = Decimal("10"),
     name: str = "Dividend",
-    amount_currency: CurrencyId = "CHF",
+    amount_currency: str = "CHF",
     quotation_type: QuotationType = "PIECE"
 ) -> SecurityPayment:
     return SecurityPayment(
@@ -1187,12 +1186,12 @@ class TestMoveNegativePaymentsToLiabilities:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("TEST-CHF"),
             bankAccountName=BankAccountName("Test Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=DEFAULT_TEST_PERIOD_TO,
                 name="Test Balance",
-                balanceCurrency=CurrencyId("CHF"),
+                balanceCurrency="CHF",
                 balance=Decimal("1000.00")
             ),
             payment=bank_payments
@@ -1218,7 +1217,7 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 6, 15),
                 name="Interest Paid",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-50.00")
             )
         ]
@@ -1251,13 +1250,13 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 3, 10),
                 name="Interest 1",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-30.00")
             ),
             BankAccountPayment(
                 paymentDate=date(2023, 9, 20),
                 name="Interest 2",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-25.50")
             )
         ]
@@ -1288,19 +1287,19 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 2, 1),
                 name="Positive Payment",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("100.00")
             ),
             BankAccountPayment(
                 paymentDate=date(2023, 6, 15),
                 name="Negative Payment",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-40.00")
             ),
             BankAccountPayment(
                 paymentDate=date(2023, 11, 30),
                 name="Another Positive",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("75.50")
             )
         ]
@@ -1333,12 +1332,12 @@ class TestMoveNegativePaymentsToLiabilities:
         negative_balance_liability = LiabilityAccount(
             bankAccountNumber=BankAccountNumber("TEST-CHF"),
             bankAccountName=BankAccountName("Test Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=LiabilityAccountTaxValue(
                 referenceDate=DEFAULT_TEST_PERIOD_TO,
                 name="Negative Balance",
-                balanceCurrency=CurrencyId("CHF"),
+                balanceCurrency="CHF",
                 balance=Decimal("500.00")
             ),
             totalTaxValue=Decimal("500.00"),
@@ -1350,7 +1349,7 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 5, 15),
                 name="Interest Payment",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-60.00")
             )
         ]
@@ -1358,12 +1357,12 @@ class TestMoveNegativePaymentsToLiabilities:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("TEST-CHF"),
             bankAccountName=BankAccountName("Test Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=DEFAULT_TEST_PERIOD_TO,
                 name="Balance",
-                balanceCurrency=CurrencyId("CHF"),
+                balanceCurrency="CHF",
                 balance=Decimal("1000.00")
             ),
             payment=payments
@@ -1403,13 +1402,13 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 3, 1),
                 name="Payment 1",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("100.00")
             ),
             BankAccountPayment(
                 paymentDate=date(2023, 9, 1),
                 name="Payment 2",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("200.00")
             )
         ]
@@ -1442,13 +1441,13 @@ class TestMoveNegativePaymentsToLiabilities:
             BankAccountPayment(
                 paymentDate=date(2023, 4, 10),
                 name="Interest 1",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-25.50")
             ),
             BankAccountPayment(
                 paymentDate=date(2023, 8, 20),
                 name="Interest 2",
-                amountCurrency=CurrencyId("CHF"),
+                amountCurrency="CHF",
                 amount=Decimal("-34.75")
             )
         ]
@@ -1478,8 +1477,8 @@ class TestMergeLiabilityAccounts:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("MERGED001"),
             bankAccountName=BankAccountName("Merged Liability Account"),
-            bankAccountCountry=CountryIdISO2Type("US"),
-            bankAccountCurrency=CurrencyId("USD"),
+            bankAccountCountry="US",
+            bankAccountCurrency="USD",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Closing Balance",
@@ -1491,7 +1490,7 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 11, 5),
                     name="USD DEBIT INT FOR OCT-2025",
-                    amountCurrency=CurrencyId("USD"),
+                    amountCurrency="USD",
                     amount=Decimal("-2.01")
                 )
             ]
@@ -1551,8 +1550,8 @@ class TestMergeLiabilityAccounts:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("MULTMERGE001"),
             bankAccountName=BankAccountName("Multi Merge Account"),
-            bankAccountCountry=CountryIdISO2Type("US"),
-            bankAccountCurrency=CurrencyId("EUR"),
+            bankAccountCountry="US",
+            bankAccountCurrency="EUR",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Year End Balance",
@@ -1564,19 +1563,19 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 3, 10),
                     name="EUR DEBIT INT FOR FEB-2025",
-                    amountCurrency=CurrencyId("EUR"),
+                    amountCurrency="EUR",
                     amount=Decimal("-1.25")
                 ),
                 BankAccountPayment(
                     paymentDate=date(2025, 7, 15),
                     name="EUR DEBIT INT FOR JUN-2025",
-                    amountCurrency=CurrencyId("EUR"),
+                    amountCurrency="EUR",
                     amount=Decimal("-3.75")
                 ),
                 BankAccountPayment(
                     paymentDate=date(2025, 10, 20),
                     name="Positive Payment",
-                    amountCurrency=CurrencyId("EUR"),
+                    amountCurrency="EUR",
                     amount=Decimal("100.00")
                 )
             ]
@@ -1629,8 +1628,8 @@ class TestMergeLiabilityAccounts:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("ORDER001"),
             bankAccountName=BankAccountName("Order Test Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Balance",
@@ -1642,7 +1641,7 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 6, 1),
                     name="CHF DEBIT INT FOR MAY-2025",
-                    amountCurrency=CurrencyId("CHF"),
+                    amountCurrency="CHF",
                     amount=Decimal("-2.50")
                 )
             ]
@@ -1681,8 +1680,8 @@ class TestMergeLiabilityAccounts:
         usd_account = BankAccount(
             bankAccountNumber=BankAccountNumber("MULTICURR-USD"),
             bankAccountName=BankAccountName("USD Account"),
-            bankAccountCountry=CountryIdISO2Type("US"),
-            bankAccountCurrency=CurrencyId("USD"),
+            bankAccountCountry="US",
+            bankAccountCurrency="USD",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Balance",
@@ -1694,7 +1693,7 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 5, 1),
                     name="USD Interest",
-                    amountCurrency=CurrencyId("USD"),
+                    amountCurrency="USD",
                     amount=Decimal("-0.50")
                 )
             ]
@@ -1703,8 +1702,8 @@ class TestMergeLiabilityAccounts:
         eur_account = BankAccount(
             bankAccountNumber=BankAccountNumber("MULTICURR-EUR"),
             bankAccountName=BankAccountName("EUR Account"),
-            bankAccountCountry=CountryIdISO2Type("US"),
-            bankAccountCurrency=CurrencyId("EUR"),
+            bankAccountCountry="US",
+            bankAccountCurrency="EUR",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Balance",
@@ -1716,7 +1715,7 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 5, 1),
                     name="EUR Interest",
-                    amountCurrency=CurrencyId("EUR"),
+                    amountCurrency="EUR",
                     amount=Decimal("-0.75")
                 )
             ]
@@ -1746,7 +1745,7 @@ class TestMergeLiabilityAccounts:
         # Verify USD liability
         usd_liability = next(
             (l for l in result.listOfLiabilities.liabilityAccount
-             if l.bankAccountCurrency == CurrencyId("USD")),
+             if l.bankAccountCurrency == "USD"),
             None
         )
         assert usd_liability is not None
@@ -1757,7 +1756,7 @@ class TestMergeLiabilityAccounts:
         # Verify EUR liability
         eur_liability = next(
             (l for l in result.listOfLiabilities.liabilityAccount
-             if l.bankAccountCurrency == CurrencyId("EUR")),
+             if l.bankAccountCurrency == "EUR"),
             None
         )
         assert eur_liability is not None
@@ -1770,8 +1769,8 @@ class TestMergeLiabilityAccounts:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("BALONLY001"),
             bankAccountName=BankAccountName("Balance Only Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Balance",
@@ -1813,8 +1812,8 @@ class TestMergeLiabilityAccounts:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("PAYONLY001"),
             bankAccountName=BankAccountName("Payment Only Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2025, 12, 31),
                 name="Balance",
@@ -1825,7 +1824,7 @@ class TestMergeLiabilityAccounts:
                 BankAccountPayment(
                     paymentDate=date(2025, 6, 1),
                     name="Interest Payment",
-                    amountCurrency=CurrencyId("CHF"),
+                    amountCurrency="CHF",
                     amount=Decimal("-5.00")
                 )
             ]
@@ -1873,8 +1872,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("NEGACC001"),
             bankAccountName=BankAccountName("Negative Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2023, 12, 31),
                 balanceCurrency="CHF",
@@ -1921,8 +1920,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("POSACC001"),
             bankAccountName=BankAccountName("Positive Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2023, 12, 31),
                 balanceCurrency="CHF",
@@ -1961,8 +1960,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("ZEROACC001"),
             bankAccountName=BankAccountName("Zero Account"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2023, 12, 31),
                 balanceCurrency="CHF",
@@ -2001,8 +2000,8 @@ class TestNegativeBankAccountBalance:
             BankAccount(
                 bankAccountNumber=BankAccountNumber("POS001"),
                 bankAccountName=BankAccountName("Positive"),
-                bankAccountCountry=CountryIdISO2Type("CH"),
-                bankAccountCurrency=CurrencyId("CHF"),
+                bankAccountCountry="CH",
+                bankAccountCurrency="CHF",
                 taxValue=BankAccountTaxValue(
                     referenceDate=date(2023, 12, 31),
                     balanceCurrency="CHF",
@@ -2013,8 +2012,8 @@ class TestNegativeBankAccountBalance:
             BankAccount(
                 bankAccountNumber=BankAccountNumber("NEG001"),
                 bankAccountName=BankAccountName("Negative"),
-                bankAccountCountry=CountryIdISO2Type("CH"),
-                bankAccountCurrency=CurrencyId("CHF"),
+                bankAccountCountry="CH",
+                bankAccountCurrency="CHF",
                 taxValue=BankAccountTaxValue(
                     referenceDate=date(2023, 12, 31),
                     balanceCurrency="CHF",
@@ -2025,8 +2024,8 @@ class TestNegativeBankAccountBalance:
             BankAccount(
                 bankAccountNumber=BankAccountNumber("ZERO001"),
                 bankAccountName=BankAccountName("Zero"),
-                bankAccountCountry=CountryIdISO2Type("CH"),
-                bankAccountCurrency=CurrencyId("CHF"),
+                bankAccountCountry="CH",
+                bankAccountCurrency="CHF",
                 taxValue=BankAccountTaxValue(
                     referenceDate=date(2023, 12, 31),
                     balanceCurrency="CHF",
@@ -2074,8 +2073,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("NEGPAY001"),
             bankAccountName=BankAccountName("Negative with Payments"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2023, 12, 31),
                 balanceCurrency="CHF",
@@ -2129,8 +2128,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("NEGDATES001"),
             bankAccountName=BankAccountName("Negative with Dates"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             openingDate=date(2023, 1, 15),
             closingDate=date(2023, 11, 30),
             taxValue=BankAccountTaxValue(
@@ -2169,8 +2168,8 @@ class TestNegativeBankAccountBalance:
         bank_account = BankAccount(
             bankAccountNumber=BankAccountNumber("NEGTRACK001"),
             bankAccountName=BankAccountName("Tracked Negative"),
-            bankAccountCountry=CountryIdISO2Type("CH"),
-            bankAccountCurrency=CurrencyId("CHF"),
+            bankAccountCountry="CH",
+            bankAccountCurrency="CHF",
             taxValue=BankAccountTaxValue(
                 referenceDate=date(2023, 12, 31),
                 balanceCurrency="CHF",
