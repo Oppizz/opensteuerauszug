@@ -68,9 +68,7 @@ class SecurityPosition(BasePosition):
         return (self.depot, self.valor, self.isin, self.symbol)
 
     def get_processing_identifier(self) -> str:
-        if self._identifier_str is None:
-            self._identifier_str = f"{self.depot}-{self.ticker if self.ticker else self.symbol}--{self.isin if self.isin else self.description}"
-        return self._identifier_str
+        return f"{self.depot}-{self.ticker if self.ticker else self.symbol}--{self.isin if self.isin else self.description}"
 
     def get_balance_name_prefix(self) -> str:
         return ""
