@@ -23,7 +23,7 @@ class FlagOverrideProvider:
         try:
             with open(file_path, mode='r', encoding='utf-8') as csvfile:
                 reader = csv.DictReader(csvfile)
-                if 'flags' in reader.fieldnames:
+                if reader.fieldnames and 'flags' in reader.fieldnames:
                     for row in reader:
                         if row.get('isin') and row.get('flags'):
                             self._overrides[row['isin']] = row['flags'].strip()

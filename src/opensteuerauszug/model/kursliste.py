@@ -965,14 +965,14 @@ class Kursliste(PydanticXmlModel, tag="kursliste", nsmap=NSMAP):
         Returns:
             List of securities with the matching valor number
         """
-        results = []
+        results: list[Security] = []
         for security_list in [
-            self.bonds, 
-            self.shares, 
-            self.funds, 
-            self.derivatives, 
-            self.coinBullions, 
-            self.currencyNotes, 
+            self.bonds,
+            self.shares,
+            self.funds,
+            self.derivatives,
+            self.coinBullions,
+            self.currencyNotes,
             self.liborSwaps
         ]:
             for security in security_list:
@@ -990,14 +990,14 @@ class Kursliste(PydanticXmlModel, tag="kursliste", nsmap=NSMAP):
         Returns:
             List of securities with the matching ISIN
         """
-        results = []
+        results: list[Security] = []
         for security_list in [
-            self.bonds, 
-            self.shares, 
-            self.funds, 
-            self.derivatives, 
-            self.coinBullions, 
-            self.currencyNotes, 
+            self.bonds,
+            self.shares,
+            self.funds,
+            self.derivatives,
+            self.coinBullions,
+            self.currencyNotes,
             self.liborSwaps
         ]:
             for security in security_list:

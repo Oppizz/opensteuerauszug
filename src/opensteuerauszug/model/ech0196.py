@@ -306,7 +306,7 @@ class BaseXmlModel(BaseModel):
 
             value = getattr(self, field_name)
             field_path = f"{current_path}.{field_name}"
-            extra = field_info.json_schema_extra or {}
+            extra = field_info.json_schema_extra if isinstance(field_info.json_schema_extra, dict) else {}
 
             if extra.get("required_for_output") and value is None:
                 errors.append(f"{field_path} is required for final output but is None")
@@ -351,7 +351,7 @@ class BaseXmlModel(BaseModel):
         data = {}
         known_attrs = { field_info.alias or name
                         for name, field_info in cls.model_fields.items()
-                        if field_info.json_schema_extra and field_info.json_schema_extra.get("is_attribute") }
+                        if isinstance(field_info.json_schema_extra, dict) and field_info.json_schema_extra.get("is_attribute") }
         unknown_attrs = {}
         for name, value in element.attrib.items():
             # Find the field corresponding to this attribute name
@@ -428,7 +428,7 @@ class BaseXmlModel(BaseModel):
 
     def _build_attributes(self, element: ET._Element):
         for name, field_info in self.__class__.model_fields.items():
-            if field_info.json_schema_extra and field_info.json_schema_extra.get("is_attribute"):
+            if isinstance(field_info.json_schema_extra, dict) and field_info.json_schema_extra.get("is_attribute"):
                 value = getattr(self, name, None)
                 # print(f"Building attribute {name} with value {value}")
                 if value is not None:
@@ -486,7 +486,7 @@ class BaseXmlModel(BaseModel):
 
         for name, field_info in cls.model_fields.items():
             # Skip attributes
-            if field_info.json_schema_extra and field_info.json_schema_extra.get("is_attribute"):
+            if isinstance(field_info.json_schema_extra, dict) and field_info.json_schema_extra.get("is_attribute"):
                 continue
             # Skip fields to exclude at XML level
             if field_info.exclude:
@@ -713,7 +713,7 @@ class BaseXmlModel(BaseModel):
     def _build_children(self, parent_element: ET._Element):
         tag_map = {}
         for name, field_info in self.__class__.model_fields.items():
-            extra = field_info.json_schema_extra or {}
+            extra = field_info.json_schema_extra if isinstance(field_info.json_schema_extra, dict) else {}
             # Skip excluded fields and attributes
             if field_info.exclude or extra.get("is_attribute"):
                 continue
@@ -837,8 +837,8 @@ class BaseXmlModel(BaseModel):
             ValueError: If strict is True and unknown attributes or elements are encountered
         """
         # Determine strictness from parameter or class config
-        strict_mode = strict if strict is not None else cls.model_config.get('strict_parsing', False)
-        
+        strict_mode: bool = bool(strict if strict is not None else cls.model_config.get('strict_parsing', False))
+
         data = cls._parse_attributes(element, strict=strict_mode)
         data.update(cls._parse_children(element, strict=strict_mode))
         # Filter out internal fields before creating model instance
@@ -1263,7 +1263,7 @@ class Security(BaseXmlModel):
     securityName: str = Field(..., max_length=60, json_schema_extra={'is_attribute': True})
     
     # Optional attributes
-    valorNumber: Optional[ValorNumber] = Field(default=None, ge=100, le=999999999999, json_schema_extra={'is_attribute': True})
+    valorNumber: Optional[ValorNumber] = Field(default=None, ge=ValorNumber(100), le=ValorNumber(999999999999), json_schema_extra={'is_attribute': True})
     isin: Optional[ISINType] = Field(default=None, pattern=r"[A-Z]{2}[A-Z0-9]{9}[0-9]{1}", json_schema_extra={'is_attribute': True})
     city: Optional[str] = Field(default=None, max_length=40, json_schema_extra={'is_attribute': True})
     nominalValue: Optional[Decimal] = Field(default=None, json_schema_extra={'is_attribute': True})
@@ -1466,6 +1466,9 @@ class TaxStatementBase(BaseXmlModel):
             error_message = f"Validation error: {e}"
             logger.error(error_message)
             raise ValueError(error_message)
+
+    def to_xml_bytes(self) -> bytes:
+        raise NotImplementedError
 
 
 # Final root model including the minorVersion attribute

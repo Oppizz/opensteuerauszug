@@ -190,7 +190,7 @@ class KurslisteAccessor:
                 country=country,
                 security_group=security_group,
                 tax_year=self.tax_year
-            )
+            ) or []
         elif isinstance(self.data_source, list):  # List[Kursliste]
             for kl_instance in self.data_source:
                 if kl_instance.year == self.tax_year and hasattr(kl_instance, 'da1Rates'):

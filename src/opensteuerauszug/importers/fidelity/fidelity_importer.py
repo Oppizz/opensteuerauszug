@@ -102,8 +102,8 @@ class FidelityImporter:
     Imports Fidelity account data for a given tax period
     from csv files.
     """
-    def _get_required_field(self, data_object: dict, field_name: str,
-                              object_description: str) -> str | None | date | list | Any:
+    def _get_required_field(self, data_object: Any, field_name: str,
+                              object_description: str) -> Any:
         """Helper to get a required field or raise ValueError if missing."""
         value = data_object.get(field_name)
         if value is None or (isinstance(value, str) and not value.strip() and not
@@ -128,8 +128,9 @@ class FidelityImporter:
             )
         if field_name =='Run Date':
             try:
-                if data_object.get('Action').find(' as of ')>0:
-                    tmp_date = data_object.get('Action').split()
+                action = data_object.get('Action')
+                if action is not None and action.find(' as of ')>0:
+                    tmp_date = action.split()
                     value = datetime.strptime(tmp_date[tmp_date.index('of')+1], "%b-%d-%Y").date()
                 else:
                     value = datetime.strptime(value.strip(), "%m/%d/%Y").date()
@@ -246,7 +247,7 @@ class FidelityImporter:
                 with ((open(filename, mode='r', encoding='us-ascii')) as csvfile):
                     logger.debug("Parsing %s: %s", log_label, filename)
                     if (filename.find('Statement') > -1):
-                        statement = {}
+                        statement: dict[str, Any] = {}
                         logger.debug("Parsing %s: %s as a Statement", log_label, filename)
                         statement['Date']= ''
                         try:
@@ -382,6 +383,7 @@ class FidelityImporter:
 
         # Map to store assetCategory and subCategory for each security
         security_asset_category_map: Dict[SecurityPosition, SecurityCategory] = {}
+        account_id: Any = None
         if (len(all_statements) > 0):
             logger.info(f"Processing statements")
         for stmt in all_statements:
@@ -399,7 +401,7 @@ class FidelityImporter:
             # --- Process Open Positions (End of Period Snapshot) ---
             end_date = self._get_required_field(stmt,'Date', 'Statement')
             end_plus_one = end_date + timedelta(days=1)
-            default_category=''
+            default_category: SecurityCategory = 'SHARE'
             for position in positions:
                 logger.debug("position: %s for stmt in all_statements", position)
                 if should_skip_entry(position, "Position"):
@@ -1029,8 +1031,11 @@ def main():
     importer = FidelityImporter(period_from, period_to,all_fidelity_account_settings_models,strict_consistency=args.strict_consistency)
     tax_statement = importer.import_dir(args.directory)
     if logging.DEBUG >= logging.root.level:
-        from devtools import debug
-        debug(tax_statement)
+        try:
+            from devtools import debug  # type: ignore[import-untyped]
+            debug(tax_statement)
+        except ImportError:
+            pass
     logger.info('Finished')
 
 if __name__ == "__main__":

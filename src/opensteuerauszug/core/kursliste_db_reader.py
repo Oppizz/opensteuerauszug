@@ -1,15 +1,19 @@
 import sqlite3
 import json
-from typing import Optional, Dict as PyDict, List, Type
+from typing import Optional, Dict as PyDict, List, Type, TypeVar
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from pydantic import ValidationError
+from pydantic_xml import BaseXmlModel as PydanticXmlModel
 
 from opensteuerauszug.model.kursliste import (
     Security, Share, Bond, Fund, Derivative, CoinBullion, CurrencyNote, LiborSwap,
     SecurityTypeESTV, Sign, Da1Rate, Da1RateType, SecurityGroupESTV
 )
+
+_T = TypeVar('_T', bound=PydanticXmlModel)
+
 
 class KurslisteDBReader:
     """
@@ -71,7 +75,7 @@ class KurslisteDBReader:
             db_path: Path to the SQLite database file.
         """
         self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn: Optional[sqlite3.Connection] = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row  # Access columns by name
         # Detect blob format from metadata (xml or json/legacy)
         self._blob_format = self._read_blob_format()
@@ -79,6 +83,8 @@ class KurslisteDBReader:
     def _read_blob_format(self) -> str:
         """Read the blob_format metadata from the database. Returns 'json' for legacy databases."""
         try:
+            if self.conn is None:
+                raise RuntimeError("KurslisteDBReader connection is closed.")
             cursor = self.conn.cursor()
             cursor.execute("SELECT value FROM metadata WHERE key = 'blob_format'")
             row = cursor.fetchone()
@@ -88,7 +94,7 @@ class KurslisteDBReader:
             pass
         return "json"  # Legacy databases used JSON blobs
 
-    def _deserialize_object(self, blob_data: bytes, model_class: Type, object_type_name: str) -> Optional[object]:
+    def _deserialize_object(self, blob_data: bytes, model_class: Type[_T], object_type_name: str) -> Optional[_T]:
         """
         Generic deserializer for objects stored as BLOBs.
         Handles both XML format (v3+) and legacy JSON format.
@@ -132,6 +138,8 @@ class KurslisteDBReader:
 
     def _execute_query_fetchone(self, query: str, params: tuple = ()) -> Optional[sqlite3.Row]:
         """Helper to execute a query and fetch one result."""
+        if self.conn is None:
+            return None
         try:
             cursor = self.conn.cursor()
             cursor.execute(query, params)
@@ -142,6 +150,8 @@ class KurslisteDBReader:
 
     def _execute_query_fetchall(self, query: str, params: tuple = ()) -> List[sqlite3.Row]:
         """Helper to execute a query and fetch all results."""
+        if self.conn is None:
+            return []
         try:
             cursor = self.conn.cursor()
             cursor.execute(query, params)
@@ -348,8 +358,7 @@ class KurslisteDBReader:
         """
         row = self._execute_query_fetchone(query, (sign_value, tax_year))
         if row and row["sign_object_blob"]:
-            # Type casting for clarity, _deserialize_object returns Optional[object]
-            return self._deserialize_object(row["sign_object_blob"], Sign, "Sign") # type: ignore
+            return self._deserialize_object(row["sign_object_blob"], Sign, "Sign")
         return None
 
     def get_da1_rate(self, country: str, security_group: SecurityGroupESTV, tax_year: int,
@@ -380,7 +389,7 @@ class KurslisteDBReader:
             if row["da1_rate_object_blob"]:
                 deserialized_obj = self._deserialize_object(row["da1_rate_object_blob"], Da1Rate, "Da1Rate")
                 if deserialized_obj:
-                    candidates.append(deserialized_obj) # type: ignore
+                    candidates.append(deserialized_obj)
 
         if not candidates:
             return None

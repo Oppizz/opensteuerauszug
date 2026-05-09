@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple, Union
 import os
 from decimal import Decimal
 from functools import lru_cache
@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 @lru_cache(maxsize=None)
-def _nyse_holidays(year: int) -> holidays.NYSE:
+def _nyse_holidays(year: int) -> Any:
     """Return cached NYSE holiday calendar for *year*."""
-    return holidays.NYSE(years=year)
+    return holidays.NYSE(years=year)  # type: ignore[attr-defined]
 
 
 def _is_nyse_holiday(d: date) -> bool:
@@ -292,7 +292,7 @@ class SchwabImporter:
         # Track covered date ranges for each depot (using DateRangeCoverage)
         depot_coverage = {}
         # Collect all positions for common post-processing
-        all_positions = []  # (Position, SecurityStock, Optional[List[SecurityPayment]])
+        all_positions: List[Tuple[Union[SecurityPosition, CashPosition], Optional[SecurityStock], Optional[List[Any]]]] = []  # (Position, SecurityStock, Optional[List[SecurityPayment]])
 
         for filename in filenames:
             ext = os.path.splitext(filename)[1].lower()
@@ -693,5 +693,8 @@ if __name__ == "__main__":
     importer = SchwabImporter(period_from, period_to, [])
     tax_statement = importer.import_dir(args.directory)
        
-    from devtools import debug  
-    debug(tax_statement)
+    try:
+        from devtools import debug  # type: ignore[import-untyped]
+        debug(tax_statement)
+    except ImportError:
+        pass

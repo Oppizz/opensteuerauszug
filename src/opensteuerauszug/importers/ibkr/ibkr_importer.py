@@ -78,7 +78,7 @@ class IbkrImporter:
     from Flex Query XML files.
     """
     def _get_required_field(self, data_object: object, field_name: str,
-                              object_description: str) -> object:
+                              object_description: str) -> Any:
         """Helper to get a required field or raise ValueError if missing."""
         value = getattr(data_object, field_name, None)
         if value is None:
@@ -576,7 +576,7 @@ class IbkrImporter:
                     # 'BUY' or 'SELL'
                     buy_sell = self._get_required_field(trade, 'buySell', 'Trade')
 
-                    transaction_type: TradeType = getattr(trade, 'transactionType', None)
+                    transaction_type: Optional[TradeType] = getattr(trade, 'transactionType', None)
                     expiry_date = getattr(trade, 'expiry', None)
                     close_price = getattr(trade, 'closePrice', None)
 
@@ -1264,8 +1264,9 @@ class IbkrImporter:
                     )
                     continue
                 curr = cash_report_currency_obj.currency
-                if curr == "BASE_SUMMARY":
+                if curr is None or curr == "BASE_SUMMARY":
                     continue
+                curr = str(curr)
 
                 closing_balance_value: Optional[Decimal] = None
                 if cash_report_currency_obj.endingCash is not None:
@@ -1275,11 +1276,11 @@ class IbkrImporter:
                         f"CashReport {account_id} {curr}",
                     )
                 elif (
-                    cash_report_currency_obj.balance is not None
-                    and cash_report_currency_obj.reportDate == self.period_to
+                    getattr(cash_report_currency_obj, 'balance', None) is not None
+                    and getattr(cash_report_currency_obj, 'reportDate', None) == self.period_to
                 ):
                     closing_balance_value = self._to_decimal(
-                        cash_report_currency_obj.balance,
+                        getattr(cash_report_currency_obj, 'balance'),
                         'balance',
                         f"CashReport {account_id} {curr}",
                     )

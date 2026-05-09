@@ -315,7 +315,7 @@ class KurslisteManager:
         if not security_model:
             return []
 
-        payments = security_model.payment
+        payments = getattr(security_model, 'payment', [])
         return [p for p in payments if not p.deleted]
     
 class KusrslisteTaxValue:

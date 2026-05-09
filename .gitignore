@@ -184,6 +184,9 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Claude Code artifacts (worktrees, session data)
+.claude/
+
 # PyPI configuration file
 .pypirc
 .aider*

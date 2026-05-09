@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import os
 import argparse
 import logging
+from typing import Any, List, Tuple, Union
 
 from pypdf import PdfReader, errors
 
@@ -153,7 +154,7 @@ class StatementExtractor:
         if not self.is_statement():
             return None
 
-        data = {}
+        data: dict[str, Any] = {}
 
         # 1. Extract Statement End Date (No change here)
         end_date = None
@@ -164,6 +165,7 @@ class StatementExtractor:
             except ValueError:
                 print("Warning: Could not parse end date from 'Closing Price on' line.")
 
+        period_end = None
         match_period = re.search(PERIOD_PATTERN, self.text_content)
         if match_period:
             try:
@@ -306,7 +308,7 @@ class StatementExtractor:
         data = self.extract_data()
         if not data:
             return None
-        positions = []
+        positions: List[Tuple[Union[SecurityPosition, CashPosition], SecurityStock]] = []
         depot = 'AWARDS'
         open_date = data.get('start_date')
         close_date = data.get('end_date')
@@ -439,8 +441,11 @@ def main():
             print(f"Open Date: {open_date}")
             print(f"Close Date Plus 1: {close_date_plus1}")
             print(f"Depot: {depot}")
-            from devtools import debug
-            debug(positions)
+            try:
+                from devtools import debug  # type: ignore[import-untyped]
+                debug(positions)
+            except ImportError:
+                print(f"Positions: {positions}")
         else:
             print("No positions extracted.")
 

@@ -81,11 +81,8 @@ markers = [
     "integration: marks tests as integration tests",
 ]
 
-# Type checking with pyrefly. Scope is everything under src/; CI invokes
-# pyrefly twice — once on src/opensteuerauszug/calculate (gating from
-# Phase 2) and once on src/ as a whole (informational). Per-module
-# severity overrides are deferred until Phase 3 once the full-repo
-# error landscape is categorized.
+# Type checking with pyrefly. Scope is everything under src/; CI gates
+# on the full src/ tree.
 [tool.pyrefly]
 project-includes = ["src/opensteuerauszug"]
 project-excludes = ["**/.venv/**", "**/build/**", "**/dist/**", "tests/**"]

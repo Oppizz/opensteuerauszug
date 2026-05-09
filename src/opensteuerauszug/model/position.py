@@ -1,5 +1,5 @@
 from typing import Optional, Union, Literal, Any
-from pydantic import BaseModel, Field, field_validator, PrivateAttr
+from pydantic import BaseModel, Field, field_validator
 
 from .ech0196 import ISINType, ValorNumber
 
@@ -11,7 +11,7 @@ class BasePosition(BaseModel):
         "arbitrary_types_allowed": True,
     }
 
-    def _comparison_key(self):
+    def _comparison_key(self) -> tuple:
         # To be overridden by subclasses for relevant fields
         return (self.depot,)
 
@@ -36,21 +36,18 @@ class CashPosition(BasePosition):
     currentCy: str = Field(default="USD", description="Currency code for cash position")
     cash_account_id: Optional[str] = Field(default=None, description="Optional identifier for a specific cash account within the same depot and currency")
     is_unsettled_balance: bool = Field(default=False, description="If True, this position holds cash that is in-transit (T+1 settlement pending)")
-    _identifier_str: Optional[str] = PrivateAttr(default=None)
 
     model_config = {
         "frozen": True,
         "arbitrary_types_allowed": True,
     }
 
-    def _comparison_key(self):
+    def _comparison_key(self) -> tuple:
         return (self.depot, self.currentCy, self.cash_account_id, self.is_unsettled_balance)
 
     def get_processing_identifier(self) -> str:
-        if self._identifier_str is None:
-            suffix = "-unsettled" if self.is_unsettled_balance else ""
-            self._identifier_str = f"Cash-{self.depot}-{self.cash_account_id}-{self.currentCy}{suffix}"
-        return self._identifier_str
+        suffix = "-unsettled" if self.is_unsettled_balance else ""
+        return f"Cash-{self.depot}-{self.cash_account_id}-{self.currentCy}{suffix}"
 
     def get_balance_name_prefix(self) -> str:
         return "Cash "
@@ -66,9 +63,8 @@ class SecurityPosition(BasePosition):
     ticker: Optional[str] = Field(default=None, description="Optional ticker symbol if symbol attribute is used for a non-ticker identifier (IBKR)")
     security_type: Optional[str] = Field(default=None, alias="securityType", description="Type of security, if available")
     description: Optional[str] = Field(default=None, description="Description of the security from the import file")
-    _identifier_str: Optional[str] = PrivateAttr(default=None)
 
-    def _comparison_key(self):
+    def _comparison_key(self) -> tuple:
         return (self.depot, self.valor, self.isin, self.symbol)
 
     def get_processing_identifier(self) -> str:

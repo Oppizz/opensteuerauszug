@@ -31,16 +31,36 @@ jobs:
         pip install git+https://github.com/vroonhof/pdf417-py.git
         pip install git+https://github.com/vroonhof/pdf417decoder.git#subdirectory=python
     - name: Lint with flake8
+      id: lint
+      continue-on-error: true
       run: |
         # stop the build if there are Python syntax errors, undefined names, or unused imports
         flake8 . --count --select=E9,F63,F7,F82,F401 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Type-check calculate/ with pyrefly (gating from Phase 2)
-      run: pyrefly check src/opensteuerauszug/calculate
-    - name: Type-check full repo with pyrefly (informational)
+    - name: Type-check with pyrefly
+      id: typecheck
       continue-on-error: true
       run: pyrefly check src
     - name: Test with pytest
+      id: test
+      continue-on-error: true
       run: |
         pytest
+    - name: Check all steps passed
+      if: always()
+      run: |
+        result=0
+        if [ "${{ steps.lint.outcome }}" != "success" ]; then
+          echo "Lint failed"
+          result=1
+        fi
+        if [ "${{ steps.typecheck.outcome }}" != "success" ]; then
+          echo "Type-check failed"
+          result=1
+        fi
+        if [ "${{ steps.test.outcome }}" != "success" ]; then
+          echo "Tests failed"
+          result=1
+        fi
+        exit $result
